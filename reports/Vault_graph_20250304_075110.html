@@ -1,0 +1,196 @@
+
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Contract Analysis Visualization</title>
+            <script src="https://unpkg.com/cytoscape/dist/cytoscape.min.js"></script>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
+                #cy { width: 100%; height: 800px; }
+                .controls { padding: 10px; background-color: #f5f5f5; border-bottom: 1px solid #ddd; }
+                button { margin: 5px; padding: 5px 10px; }
+            </style>
+        </head>
+        <body>
+            <div class="controls">
+                <button id="fit">Fit View</button>
+                <button id="grid">Grid Layout</button>
+                <button id="cose">COSE Layout</button>
+                <button id="circle">Circle Layout</button>
+                <button id="breadthfirst">Tree Layout</button>
+                <span>Zoom: </span>
+                <button id="zoom-in">+</button>
+                <button id="zoom-out">-</button>
+            </div>
+            <div id="cy"></div>
+            <script>
+                // Graph data
+                var graphData = {"elements": {"nodes": [{"data": {"id": "for", "label": "for", "type": "contract", "file": "Vault.sol"}}, {"data": {"id": "Vault", "label": "Vault", "type": "contract", "file": "Vault.sol"}}, {"data": {"id": "for_event_Deposit", "label": "Deposit", "type": "event", "contract": "for"}}, {"data": {"id": "for_event_Withdrawal", "label": "Withdrawal", "type": "event", "contract": "for"}}, {"data": {"id": "Vault_event_Deposit", "label": "Deposit", "type": "event", "contract": "Vault"}}, {"data": {"id": "Vault_event_Withdrawal", "label": "Withdrawal", "type": "event", "contract": "Vault"}}], "edges": [{"data": {"id": "for-for_event_Deposit-emits", "source": "for", "target": "for_event_Deposit", "label": "emits", "type": "emits"}}, {"data": {"id": "for-for_event_Withdrawal-emits", "source": "for", "target": "for_event_Withdrawal", "label": "emits", "type": "emits"}}, {"data": {"id": "Vault-Vault_event_Deposit-emits", "source": "Vault", "target": "Vault_event_Deposit", "label": "emits", "type": "emits"}}, {"data": {"id": "Vault-Vault_event_Withdrawal-emits", "source": "Vault", "target": "Vault_event_Withdrawal", "label": "emits", "type": "emits"}}]}};
+                
+                // Initialize Cytoscape
+                var cy = cytoscape({
+                    container: document.getElementById('cy'),
+                    elements: graphData.elements,
+                    style: [
+                        // Node styles
+                        {
+                            selector: 'node',
+                            style: {
+                                'label': 'data(label)',
+                                'text-valign': 'center',
+                                'color': '#fff',
+                                'background-color': '#11479e',
+                                'text-outline-width': 2,
+                                'text-outline-color': '#11479e'
+                            }
+                        },
+                        // Contract nodes
+                        {
+                            selector: 'node[type="contract"]',
+                            style: {
+                                'background-color': '#4b5320',
+                                'text-outline-color': '#4b5320',
+                                'shape': 'rectangle',
+                                'width': '120px',
+                                'height': '60px',
+                                'font-weight': 'bold'
+                            }
+                        },
+                        // Function nodes
+                        {
+                            selector: 'node[type="function"]',
+                            style: {
+                                'background-color': '#11479e',
+                                'text-outline-color': '#11479e',
+                                'shape': 'round-rectangle',
+                                'width': '100px',
+                                'height': '40px'
+                            }
+                        },
+                        // Variable nodes
+                        {
+                            selector: 'node[type="variable"]',
+                            style: {
+                                'background-color': '#9932cc',
+                                'text-outline-color': '#9932cc',
+                                'shape': 'ellipse',
+                                'width': '80px',
+                                'height': '40px'
+                            }
+                        },
+                        // Event nodes
+                        {
+                            selector: 'node[type="event"]',
+                            style: {
+                                'background-color': '#dc582a',
+                                'text-outline-color': '#dc582a',
+                                'shape': 'diamond',
+                                'width': '80px',
+                                'height': '40px'
+                            }
+                        },
+                        // Edge styles
+                        {
+                            selector: 'edge',
+                            style: {
+                                'width': 2,
+                                'curve-style': 'bezier',
+                                'line-color': '#9dbaea',
+                                'target-arrow-color': '#9dbaea',
+                                'target-arrow-shape': 'triangle',
+                                'arrow-scale': 1.5
+                            }
+                        },
+                        // Edge with labels
+                        {
+                            selector: 'edge[label]',
+                            style: {
+                                'label': 'data(label)',
+                                'text-rotation': 'autorotate',
+                                'text-margin-y': -10,
+                                'font-size': '10px'
+                            }
+                        },
+                        // Inheritance edges
+                        {
+                            selector: 'edge[type="inherits"]',
+                            style: {
+                                'line-color': '#ff5733',
+                                'target-arrow-color': '#ff5733',
+                                'line-style': 'dashed'
+                            }
+                        },
+                        // Function call edges
+                        {
+                            selector: 'edge[type="calls"]',
+                            style: {
+                                'line-color': '#33a8ff',
+                                'target-arrow-color': '#33a8ff'
+                            }
+                        },
+                        // Uses edges
+                        {
+                            selector: 'edge[type="uses"]',
+                            style: {
+                                'line-color': '#33ff57',
+                                'target-arrow-color': '#33ff57',
+                                'target-arrow-shape': 'diamond'
+                            }
+                        }
+                    ],
+                    layout: {
+                        name: 'cose',
+                        idealEdgeLength: 150,
+                        nodeOverlap: 20,
+                        padding: 30
+                    }
+                });
+                
+                // Control buttons
+                document.getElementById('fit').addEventListener('click', function() {
+                    cy.fit();
+                });
+                
+                document.getElementById('grid').addEventListener('click', function() {
+                    cy.layout({ name: 'grid' }).run();
+                });
+                
+                document.getElementById('cose').addEventListener('click', function() {
+                    cy.layout({ 
+                        name: 'cose',
+                        idealEdgeLength: 150,
+                        nodeOverlap: 20,
+                        padding: 30
+                    }).run();
+                });
+                
+                document.getElementById('circle').addEventListener('click', function() {
+                    cy.layout({ name: 'circle' }).run();
+                });
+                
+                document.getElementById('breadthfirst').addEventListener('click', function() {
+                    cy.layout({ 
+                        name: 'breadthfirst',
+                        directed: true,
+                        padding: 30
+                    }).run();
+                });
+                
+                document.getElementById('zoom-in').addEventListener('click', function() {
+                    cy.zoom({
+                        level: cy.zoom() * 1.2,
+                        renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+                    });
+                });
+                
+                document.getElementById('zoom-out').addEventListener('click', function() {
+                    cy.zoom({
+                        level: cy.zoom() * 0.8,
+                        renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+                    });
+                });
+            </script>
+        </body>
+        </html>
+        
