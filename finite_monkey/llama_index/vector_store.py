@@ -1,20 +1,28 @@
 """
-Asynchronous LanceDB adapter for LlamaIndex
+Asynchronous LanceDB adapter and vector store manager for LlamaIndex
 
-This module provides an async adapter for LanceDB to be used with LlamaIndex.
+This module provides an async adapter for LanceDB to be used with LlamaIndex
+and a vector store manager for handling collections and embeddings.
 """
 
 import os
 import asyncio
 import json
-from typing import Any, Dict, List, Optional, Tuple, cast
+import logging
+from typing import Any, Dict, List, Optional, Tuple, cast, Union
 
 import numpy as np
 
-from llama_index.core.schema import BaseNode, MetadataMode, TextNode
+from llama_index.core.schema import BaseNode, MetadataMode, TextNode, Document
 from llama_index.core.vector_stores import VectorStoreQuery
 from llama_index.core.vector_stores.types import VectorStoreQueryResult
 from llama_index.core.vector_stores.simple import SimpleVectorStore
+from llama_index.core.node_parser import SentenceSplitter
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+
+from finite_monkey.nodes_config import nodes_config
+
+logger = logging.getLogger(__name__)
 
 
 class AsyncLanceDBAdapter:
@@ -267,3 +275,209 @@ class AsyncLanceDBAdapter:
                 return " OR ".join(conditions)
         
         return None
+
+
+class VectorStoreManager:
+    """
+    Manages vector store operations for document embeddings
+    
+    This class provides methods for creating and managing vector stores,
+    adding documents, and performing semantic search.
+    """
+    
+    def __init__(self, vector_store_path: Optional[str] = None):
+        """
+        Initialize the VectorStoreManager
+        
+        Args:
+            vector_store_path: Path to the vector store directory
+        """
+        # Load config
+        self.config = nodes_config()
+        
+        # Set vector store path
+        self.vector_store_path = vector_store_path or os.path.join(
+            os.getcwd(), "lancedb"
+        )
+        
+        # Ensure vector store directory exists
+        os.makedirs(self.vector_store_path, exist_ok=True)
+        
+        # Initialize embedding model
+        self.embedding_model = HuggingFaceEmbedding(
+            model_name=self.config.EMBEDDING_MODEL or "BAAI/bge-small-en-v1.5"
+        )
+        
+        # Initialize LanceDB vector store
+        self._vector_store = None
+        self._indices = {}
+    
+    async def get_or_create_collection(self, collection_name: str) -> Any:
+        """
+        Get or create a LanceDB collection
+        
+        Args:
+            collection_name: Name of the collection
+            
+        Returns:
+            LanceDB collection
+        """
+        try:
+            import lancedb
+            
+            # Connect to LanceDB
+            db = await asyncio.to_thread(
+                lancedb.connect, self.vector_store_path
+            )
+            
+            # Get table names
+            table_names = await asyncio.to_thread(db.table_names)
+            
+            # Get or create collection
+            if collection_name in table_names:
+                collection = await asyncio.to_thread(db.open_table, collection_name)
+            else:
+                # Create a new collection with schema
+                embed_dim = len(self.embedding_model.get_text_embedding("test"))
+                
+                import pyarrow as pa
+                schema = pa.schema([
+                    pa.field("id", pa.string()),
+                    pa.field("text", pa.string()),
+                    pa.field("vector", pa.list_(pa.float32(), embed_dim)),
+                    pa.field("metadata", pa.string()),
+                ])
+                
+                collection = await asyncio.to_thread(
+                    db.create_table,
+                    collection_name,
+                    schema=schema,
+                    mode="create"
+                )
+            
+            return collection
+            
+        except Exception as e:
+            logger.error(f"Error getting or creating collection {collection_name}: {e}")
+            raise
+    
+    async def add_documents(self, collection: Any, documents: List[Document]) -> bool:
+        """
+        Add documents to a vector store collection
+        
+        Args:
+            collection: LanceDB collection
+            documents: List of documents to add
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Parse documents into nodes
+            parser = SentenceSplitter(
+                chunk_size=self.config.CHUNK_SIZE or 1024,
+                chunk_overlap=self.config.CHUNK_OVERLAP or 200,
+            )
+            
+            # Process each document
+            for document in documents:
+                # Parse document into nodes
+                nodes = parser.get_nodes_from_documents([document])
+                
+                # Add document data
+                records = []
+                for node in nodes:
+                    # Embed node text
+                    embedding = self.embedding_model.get_text_embedding(node.text)
+                    
+                    # Create data entry
+                    metadata = {
+                        **node.metadata,
+                        "node_id": node.id_,
+                        "document_id": document.id_,
+                    }
+                    
+                    records.append({
+                        "id": node.id_,
+                        "text": node.text,
+                        "vector": embedding,
+                        "metadata": json.dumps(metadata),
+                    })
+                
+                # Add data to collection
+                if records:
+                    await asyncio.to_thread(collection.add, records)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error adding documents to collection: {e}")
+            return False
+    
+    async def search(
+        self,
+        collection: Any,
+        query: str,
+        limit: int = 10,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for documents in a collection
+        
+        Args:
+            collection: LanceDB collection
+            query: Query string
+            limit: Maximum number of results
+            filters: Metadata filters
+            
+        Returns:
+            List of search results
+        """
+        try:
+            # Embed query
+            query_embedding = self.embedding_model.get_text_embedding(query)
+            
+            # Build search query
+            search_query = collection.search(query_embedding)
+            
+            # Add filters if provided
+            if filters:
+                filter_conditions = []
+                for key, value in filters.items():
+                    if isinstance(value, str):
+                        filter_conditions.append(
+                            f'json_extract(metadata, "$.{key}") = "{value}"'
+                        )
+                    else:
+                        filter_conditions.append(
+                            f'json_extract(metadata, "$.{key}") = {value}'
+                        )
+                
+                if filter_conditions:
+                    filter_str = " AND ".join(filter_conditions)
+                    search_query = search_query.where(filter_str)
+            
+            # Limit results
+            search_query = search_query.limit(limit)
+            
+            # Execute search
+            results = await asyncio.to_thread(search_query.to_df)
+            
+            # Format results
+            formatted_results = []
+            for _, row in results.iterrows():
+                # Extract metadata
+                metadata = json.loads(row["metadata"])
+                
+                formatted_results.append({
+                    "id": row["id"],
+                    "text": row["text"],
+                    "metadata": metadata,
+                    "score": row["score"],
+                })
+            
+            return formatted_results
+            
+        except Exception as e:
+            logger.error(f"Error searching collection: {e}")
+            return []

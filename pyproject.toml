@@ -26,6 +26,15 @@ dependencies = [
     "llama-index-core>=0.12.22",
     "hf-transfer>=0.1.9",
     "llama-index-vector-stores-lancedb>=0.3.0",
+    "fpdf>=1.7.2",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.28.0",
+    "jinja2>=3.1.2",
+    "websockets>=12.0.0",
+    "ipython>=8.12.0",
+    "pydantic>=2.5.2",
+    "griffe>=1.6.0",
+    "pydantic-settings>=2.8.1",
 ]
 
 [project.optional-dependencies]
@@ -42,6 +51,13 @@ WORKFLOW_MODEL=""
 
 [tool.setuptools]
 packages = ["finite_monkey"]
+
+[project.scripts]
+finite-monkey = "finite_monkey.__main__:run_main"
+finite-monkey-web = "finite_monkey.web.app:run_server"
+
+[project.entry-points."console_scripts"]
+finite-monkey = "finite_monkey.__main__:run_main"
 
 [tool.black]
 line-length = 88

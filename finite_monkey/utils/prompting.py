@@ -2,7 +2,7 @@
 Prompt templates and utilities for LLM interactions
 """
 
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 
 def get_analysis_prompt(
@@ -211,3 +211,319 @@ Make it accessible to both technical and non-technical stakeholders.
 """
     
     return prompt
+
+
+def format_prompt(template: str, **kwargs) -> str:
+    """
+    Format a prompt template with the given arguments
+    
+    Args:
+        template: Name of the template to format
+        **kwargs: Arguments to format the template with
+        
+    Returns:
+        Formatted prompt
+    """
+    templates = {
+        **get_business_flow_prompts(),
+        **get_cognitive_bias_prompts(),
+    }
+    
+    if template not in templates:
+        raise ValueError(f"Template {template} not found")
+    
+    # Format the template
+    return templates[template].format(**kwargs)
+
+
+def get_cognitive_bias_prompts() -> Dict[str, str]:
+    """
+    Get prompts for cognitive bias analysis
+    
+    Returns:
+        Dictionary of prompt templates
+    """
+    return {
+        "cognitive_bias_analysis": """
+You are an expert smart contract security auditor specializing in identifying cognitive bias patterns in code.
+Your task is to analyze the following contract for vulnerabilities resulting from {bias_description}
+
+CONTRACT:
+```solidity
+{contract_code}
+```
+
+Technical patterns associated with this cognitive bias include:
+{technical_patterns}
+
+DETECTION INSTRUCTIONS:
+{detection_prompt}
+
+Analyze the code carefully, looking for instances of this cognitive bias. For each instance:
+1. Identify the specific function or code section that demonstrates the bias
+2. Explain how the developer's thinking exhibits this cognitive bias
+3. Describe the potential security vulnerability that results from this bias
+4. Rate the severity (Critical, High, Medium, Low, Informational)
+5. Suggest how to fix the issue
+
+Provide your analysis in a structured format with clear sections for each finding.
+Be specific and reference line numbers or function names where possible.
+Conclude with a summary of all findings related to this cognitive bias.
+""",
+
+        "developer_assumption_analysis": """
+You are an expert in analyzing the cognitive biases and assumptions that lead to security vulnerabilities in smart contracts.
+Analyze the following contract and the vulnerabilities that have been identified:
+
+CONTRACT:
+```solidity
+{contract_code}
+```
+
+VULNERABILITIES IDENTIFIED:
+{vulnerabilities}
+
+Your task is to map each vulnerability to the developer assumption that created it.
+Consider these common assumption categories:
+{assumption_categories}
+
+For each assumption category that applies:
+1. Explain how this assumption manifests in the code
+2. List which vulnerabilities resulted from this assumption
+3. Describe why this assumption fails in real-world conditions
+4. Suggest how to adjust the developer's mental model to avoid this assumption
+
+Provide a detailed analysis for each relevant assumption category.
+Be specific and reference the actual vulnerabilities listed above.
+""",
+
+        "cognitive_bias_remediation": """
+You are a smart contract security remediation specialist focusing on cognitive bias-driven vulnerabilities.
+You need to create a remediation plan for {bias_type} bias vulnerabilities in the following contract:
+
+CONTRACT:
+```solidity
+{contract_code}
+```
+
+BIAS DESCRIPTION: {bias_description}
+
+IDENTIFIED INSTANCES:
+{instances}
+
+For each instance, provide a detailed remediation plan that includes:
+
+1. Specific code changes that address both the technical vulnerability and the underlying cognitive bias
+2. Explanation of how the fix addresses the root cause, not just the symptom
+3. Alternative approaches that could also work
+4. Validation checks to ensure the fix is correct
+5. Any potential side effects of the proposed fix that should be considered
+
+Make your remediation advice concrete and actionable.
+Include code examples that demonstrate proper implementation.
+Ensure your fixes are gas-efficient and follow best practices.
+""",
+
+        "four_stage_analysis": """
+You are a smart contract security analyzer using a structured four-stage approach to vulnerability detection.
+Analyze the following contract using all four stages of the analysis framework:
+
+CONTRACT:
+```solidity
+{contract_code}
+```
+
+STAGE 1: Pattern-Based Vulnerability Identification
+First, scan the contract for these specific vulnerability patterns and catalog all instances:
+- Pattern A: External calls followed by state changes
+- Pattern B: Division without zero-checks
+- Pattern C: Public state-changing functions without access control
+- Pattern D: Single-step privilege operations
+List each instance with line numbers.
+
+STAGE 2: Context and Impact Analysis
+For each pattern identified, answer these specific questions:
+1. What is the DIRECT impact if exploited? (funds lost, parameters corrupted)
+2. What is the WIDER impact on the protocol? (cascading failures, economic damage)
+3. Who could EXPLOIT this vulnerability? (any user, specific roles, sophisticated attackers)
+4. What CONDITIONS need to exist for successful exploitation?
+Provide specific, concrete answers for each instance.
+
+STAGE 3: Developer Assumption Analysis
+For each vulnerability, identify which developer assumption created it:
+A. "This will only be called in the expected order"
+B. "This value will never be zero/extreme"
+C. "Only authorized users would call this function"
+D. "This interaction will always succeed"
+E. "Users will use this as intended"
+Explain exactly how this assumption fails under real-world conditions.
+
+STAGE 4: Remediation and Validation
+For each vulnerability:
+1. Provide a SPECIFIC code fix (not just general advice)
+2. Explain how the fix addresses the root cause
+3. Add a validation check that would confirm the fix works
+4. Suggest a test scenario that would verify security
+Ensure fixes address both the technical vulnerability and the underlying assumption failure.
+
+Present your analysis in a clear, organized format covering all four stages.
+"""
+    }
+
+
+def get_business_flow_prompts() -> Dict[str, str]:
+    """
+    Get prompts for business flow extraction
+    
+    Returns:
+        Dictionary of prompt templates
+    """
+    return {
+        "function_analysis": """
+You are an expert smart contract code analyzer with a deep understanding of business logic.
+Analyze the following solidity function from the {contract_name} contract:
+
+```solidity
+{function_code}
+```
+
+Function signature: {function_signature}
+
+Contract context:
+{contract_context}
+
+I need you to analyze this function's business purpose and role in the contract's overall functionality.
+Provide your analysis in the following structure:
+
+Function Type: [Categorize the function's primary type (e.g., setter, getter, transfer, withdraw, deposit, swap, mint, burn, etc.)]
+
+Business Purpose: [One-line description of the function's business purpose]
+
+Description: [Detailed description of what the function does in business terms]
+
+State Changes: [List the state variables modified by this function and how they change]
+
+External Calls: [List any external contract calls made by this function]
+
+Security Considerations: [List any security concerns related to this function]
+
+Business Flow Potential: [High/Medium/Low - indicate if this function is likely to be part of a critical business flow]
+
+Your analysis should focus on the business logic and purpose, not just code mechanics.
+""",
+
+        "function_relationships": """
+You are an expert in identifying business processes and workflows in smart contracts.
+Analyze the functions in the {contract_name} {contract_type} to identify relationships and business flows.
+
+Key Functions:
+{functions}
+
+Function Relationships:
+{relationship_graph}
+
+Identify the following:
+
+1. Workflows: Sequences of function calls that together implement a business process
+2. Key Functions: The most important functions that define the contract's core functionality
+3. Function Groups: Sets of functions that work together to implement a specific feature
+
+Provide your analysis in JSON format:
+
+```json
+{{
+  "workflows": [
+    {{
+      "name": "Workflow Name",
+      "functions": ["function1", "function2"],
+      "description": "What this workflow accomplishes"
+    }}
+  ],
+  "key_functions": ["function1", "function2"],
+  "function_groups": [
+    {{
+      "name": "Group Name",
+      "functions": ["function1", "function2"],
+      "purpose": "What this group of functions does"
+    }}
+  ]
+}}
+```
+
+Focus on identifying meaningful business flows rather than simple implementation details.
+""",
+
+        "business_flow_validation": """
+You are an expert in smart contract business logic and security analysis.
+Validate and enhance the following business flow extracted from the {contract_name} contract:
+
+Flow Name: {flow_name}
+Flow Type: {flow_type}
+Description: {flow_description}
+
+Code:
+```solidity
+{flow_code}
+```
+
+Context:
+{flow_context}
+
+Your task is to:
+1. Validate if this is a meaningful business flow
+2. Enhance the flow name, description, and type if needed
+3. Add any missing context that would help in understanding this flow
+4. Identify potential security considerations related to this flow
+
+Provide your analysis in the following format:
+
+Valid Business Flow: [Yes/No]
+
+Enhanced Name: [Improved name for the flow]
+
+Enhanced Type: [Improved type classification]
+
+Enhanced Description: [More detailed and accurate description]
+
+Additional Context: [Any missing contextual information]
+
+Security Considerations:
+- [Security consideration 1]
+- [Security consideration 2]
+
+Focus on how this flow contributes to the overall business logic of the contract and any security implications it may have.
+""",
+
+        "project_scan": """
+You are analyzing a smart contract project for security vulnerabilities and potential business logic flaws.
+Based on the identified business flows, you need to generate specific checks to perform.
+
+Project Overview:
+{project_overview}
+
+Identified Business Flows:
+{business_flows}
+
+Your task is to generate a comprehensive set of security and business logic checks that should be performed
+on these business flows. The checks should be specific to the identified flows, not generic checks.
+
+For each business flow, provide:
+
+1. Flow Name: [Name of the flow]
+2. Critical Invariants:
+   - [Invariant 1]: [Why it matters]
+   - [Invariant 2]: [Why it matters]
+3. Security Checks:
+   - [Check 1]: [Description of what to verify]
+   - [Check 2]: [Description of what to verify]
+4. Edge Cases to Test:
+   - [Edge case 1]
+   - [Edge case 2]
+5. Business Logic Verification:
+   - [Verification point 1]
+   - [Verification point 2]
+
+Focus on the most critical aspects of each business flow, particularly concerning value handling,
+access control, state transitions, and interactions with external contracts.
+"""
+    }

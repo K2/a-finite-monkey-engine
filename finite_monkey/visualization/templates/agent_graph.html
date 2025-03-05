@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Finite Monkey - Agent Workflow Graph</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background-color: #f5f5f5;
+        }
+        
+        .header {
+            background-color: #333;
+            color: white;
+            padding: 15px;
+            text-align: center;
+        }
+        
+        .container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        
+        .graph-container {
+            flex: 3;
+            overflow: hidden;
+            background-color: white;
+            border-right: 1px solid #ccc;
+            position: relative;
+        }
+        
+        .sidebar {
+            flex: 1;
+            min-width: 300px;
+            padding: 15px;
+            overflow-y: auto;
+            background-color: #f9f9f9;
+        }
+        
+        .node {
+            stroke: #333;
+            stroke-width: 1.5px;
+            cursor: pointer;
+        }
+        
+        .node.manager {
+            fill: #4285F4;
+        }
+        
+        .node.agent {
+            fill: #34A853;
+        }
+        
+        .node.running {
+            stroke: #FBBC05;
+            stroke-width: 3px;
+        }
+        
+        .node.failed {
+            fill: #EA4335;
+        }
+        
+        .link {
+            stroke: #999;
+            stroke-opacity: 0.6;
+            stroke-width: 2px;
+            marker-end: url(#arrowhead);
+        }
+        
+        .node-label {
+            font-size: 12px;
+            fill: #333;
+            pointer-events: none;
+            text-anchor: middle;
+        }
+        
+        .link-label {
+            font-size: 10px;
+            fill: #666;
+            pointer-events: none;
+            text-anchor: middle;
+        }
+        
+        .controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        }
+        
+        button {
+            margin: 5px;
+            padding: 5px 10px;
+            border: none;
+            background-color: #4285F4;
+            color: white;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background-color: #3b78e7;
+        }
+        
+        .node-details {
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .node-details h3 {
+            margin-top: 0;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+        }
+        
+        .metrics-section {
+            margin-top: 20px;
+        }
+        
+        .metrics-section h3 {
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+        }
+        
+        .metric-card {
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .metric-card h4 {
+            margin-top: 0;
+            margin-bottom: 5px;
+            color: #333;
+        }
+        
+        .metric-value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #4285F4;
+        }
+        
+        .footer {
+            background-color: #333;
+            color: white;
+            padding: 10px;
+            text-align: center;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Finite Monkey - Agent Workflow Graph</h1>
+        <p>Visualization of agent interactions and workflow state</p>
+    </div>
+    
+    <div class="container">
+        <div class="graph-container" id="graph">
+            <div class="controls">
+                <button id="zoom-in">Zoom In</button>
+                <button id="zoom-out">Zoom Out</button>
+                <button id="reset">Reset</button>
+                <button id="toggle-physics">Toggle Physics</button>
+            </div>
+        </div>
+        
+        <div class="sidebar">
+            <div class="node-details" id="node-details">
+                <h3>Select a node to view details</h3>
+                <p>Click on any node in the graph to view its details here.</p>
+            </div>
+            
+            <div class="metrics-section">
+                <h3>Workflow Metrics</h3>
+                <div class="metric-card">
+                    <h4>Success Rate</h4>
+                    <div class="metric-value" id="success-rate">-</div>
+                </div>
+                <div class="metric-card">
+                    <h4>Active Tasks</h4>
+                    <div class="metric-value" id="active-tasks">-</div>
+                </div>
+                <div class="metric-card">
+                    <h4>Completed Tasks</h4>
+                    <div class="metric-value" id="completed-tasks">-</div>
+                </div>
+                <div class="metric-card">
+                    <h4>Average Response Time</h4>
+                    <div class="metric-value" id="avg-response-time">-</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="footer">
+        <p>Generated at {{TIMESTAMP}} | Finite Monkey Engine | &copy; 2025</p>
+    </div>
+    
+    <script>
+        // Graph data from the backend
+        const graphData = {{GRAPH_DATA}};
+        const metricsData = {{METRICS_DATA}};
+        
+        // D3.js visualization code
+        const width = document.getElementById('graph').clientWidth;
+        const height = document.getElementById('graph').clientHeight;
+        
+        // Create SVG element
+        const svg = d3.select('#graph')
+            .append('svg')
+            .attr('width', '100%')
+            .attr('height', '100%')
+            .attr('viewBox', [0, 0, width, height]);
+        
+        // Define arrowhead marker
+        svg.append('defs').append('marker')
+            .attr('id', 'arrowhead')
+            .attr('viewBox', '0 -5 10 10')
+            .attr('refX', 20)
+            .attr('refY', 0)
+            .attr('orient', 'auto')
+            .attr('markerWidth', 8)
+            .attr('markerHeight', 8)
+            .append('path')
+            .attr('d', 'M0,-5L10,0L0,5')
+            .attr('fill', '#999');
+        
+        // Create a group to apply zoom behavior
+        const g = svg.append('g');
+        
+        // Create a zoom behavior
+        const zoom = d3.zoom()
+            .scaleExtent([0.1, 4])
+            .on('zoom', (event) => {
+                g.attr('transform', event.transform);
+            });
+        
+        svg.call(zoom);
+        
+        // Create a force simulation
+        const simulation = d3.forceSimulation(graphData.nodes)
+            .force('link', d3.forceLink(graphData.edges)
+                .id(d => d.id)
+                .distance(150))
+            .force('charge', d3.forceManyBody().strength(-300))
+            .force('center', d3.forceCenter(width / 2, height / 2))
+            .on('tick', ticked);
+        
+        // Create the links
+        const link = g.append('g')
+            .selectAll('line')
+            .data(graphData.edges)
+            .enter().append('line')
+            .attr('class', 'link');
+        
+        // Create the link labels
+        const linkLabel = g.append('g')
+            .selectAll('text')
+            .data(graphData.edges)
+            .enter().append('text')
+            .attr('class', 'link-label')
+            .text(d => d.type);
+        
+        // Create the nodes
+        const node = g.append('g')
+            .selectAll('circle')
+            .data(graphData.nodes)
+            .enter().append('circle')
+            .attr('class', d => `node ${d.type} ${d.state}`)
+            .attr('r', 15)
+            .on('click', nodeClicked)
+            .call(d3.drag()
+                .on('start', dragstarted)
+                .on('drag', dragged)
+                .on('end', dragended));
+        
+        // Create the node labels
+        const nodeLabel = g.append('g')
+            .selectAll('text')
+            .data(graphData.nodes)
+            .enter().append('text')
+            .attr('class', 'node-label')
+            .attr('dy', 25)
+            .text(d => d.id);
+        
+        // Update positions on each tick of the simulation
+        function ticked() {
+            link
+                .attr('x1', d => d.source.x)
+                .attr('y1', d => d.source.y)
+                .attr('x2', d => d.target.x)
+                .attr('y2', d => d.target.y);
+            
+            linkLabel
+                .attr('x', d => (d.source.x + d.target.x) / 2)
+                .attr('y', d => (d.source.y + d.target.y) / 2);
+            
+            node
+                .attr('cx', d => d.x)
+                .attr('cy', d => d.y);
+            
+            nodeLabel
+                .attr('x', d => d.x)
+                .attr('y', d => d.y);
+        }
+        
+        // Handle node click
+        function nodeClicked(event, d) {
+            // Display node details in the sidebar
+            const details = document.getElementById('node-details');
+            details.innerHTML = `
+                <h3>${d.id}</h3>
+                <p><strong>Type:</strong> ${d.type}</p>
+                <p><strong>State:</strong> ${d.state}</p>
+                <p><strong>Model:</strong> ${d.model}</p>
+            `;
+            
+            // Add more details if they exist in metrics
+            if (metricsData.agents && metricsData.agents[d.id]) {
+                const agentMetrics = metricsData.agents[d.id];
+                details.innerHTML += `
+                    <h4>Metrics</h4>
+                    <p><strong>Success Rate:</strong> ${(agentMetrics.success_rate * 100).toFixed(1)}%</p>
+                    <p><strong>Avg Response Time:</strong> ${agentMetrics.avg_response_time.toFixed(2)}s</p>
+                    <p><strong>Calls:</strong> ${agentMetrics.calls}</p>
+                    <p><strong>Last Called:</strong> ${agentMetrics.last_called || 'Never'}</p>
+                `;
+            }
+        }
+        
+        // Handle drag start
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+        
+        // Handle dragging
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+        
+        // Handle drag end
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+        
+        // Update UI with metrics
+        function updateMetricsUI() {
+            if (metricsData && metricsData.workflow_metrics) {
+                const wm = metricsData.workflow_metrics;
+                document.getElementById('success-rate').textContent = 
+                    wm.tasks_created > 0 
+                        ? `${((wm.tasks_completed / wm.tasks_created) * 100).toFixed(1)}%` 
+                        : 'N/A';
+                
+                document.getElementById('active-tasks').textContent = 
+                    wm.tasks_created - wm.tasks_completed - wm.tasks_failed;
+                
+                document.getElementById('completed-tasks').textContent = 
+                    `${wm.tasks_completed}/${wm.tasks_created}`;
+                
+                // Calculate avg response time if available
+                let totalTime = 0;
+                let count = 0;
+                
+                if (metricsData.agents) {
+                    Object.values(metricsData.agents).forEach(agent => {
+                        if (agent.avg_response_time) {
+                            totalTime += agent.avg_response_time;
+                            count++;
+                        }
+                    });
+                    
+                    document.getElementById('avg-response-time').textContent = 
+                        count > 0 
+                            ? `${(totalTime / count).toFixed(2)}s` 
+                            : 'N/A';
+                }
+            }
+        }
+        
+        // Initialize metrics UI
+        updateMetricsUI();
+        
+        // UI controls
+        document.getElementById('zoom-in').addEventListener('click', () => {
+            svg.transition().call(zoom.scaleBy, 1.5);
+        });
+        
+        document.getElementById('zoom-out').addEventListener('click', () => {
+            svg.transition().call(zoom.scaleBy, 0.75);
+        });
+        
+        document.getElementById('reset').addEventListener('click', () => {
+            svg.transition().call(zoom.transform, d3.zoomIdentity);
+        });
+        
+        let physicsEnabled = true;
+        document.getElementById('toggle-physics').addEventListener('click', () => {
+            physicsEnabled = !physicsEnabled;
+            if (physicsEnabled) {
+                simulation.alphaTarget(0.3).restart();
+            } else {
+                simulation.stop();
+            }
+        });
+    </script>
+</body>
+</html>

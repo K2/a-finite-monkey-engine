@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     
     WORKFLOW_MODEL:str =""
     QUERY_MODEL:str=""
-    UESR_QUERY:str=""
+    USER_QUERY:str=""
     
     # Database settings
     DATABASE_URL: str = "postgresql://postgres:1234@127.0.0.1:5432/postgres"
@@ -87,6 +87,14 @@ class Settings(BaseSettings):
     MAX_THREADS_OF_SCAN: int = 8
     MAX_THREADS_OF_CONFIRMATION: int = 8
     BUSINESS_FLOW_COUNT: int = 10
+    BUSINESS_FLOW_ANALYSIS_INTENSITY: float = 1.0
+    
+    # Database settings
+    DB_DIR: str = "db"
+    VECTOR_STORE_PATH: str = "lancedb"
+    EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
+    CHUNK_SIZE: int = 1024
+    CHUNK_OVERLAP: int = 200
     
     # Feature toggles
     SWITCH_BUSINESS_CODE: bool = True

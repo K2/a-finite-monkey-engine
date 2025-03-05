@@ -1,0 +1,128 @@
+Metadata-Version: 2.2
+Name: finite-monkey
+Version: 0.1.0
+Summary: Smart Contract Audit & Analysis Framework
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: llama-index[packets,utils]>=0.10.0
+Requires-Dist: httpx>=0.27.0
+Requires-Dist: SQLAlchemy>=2.0.25
+Requires-Dist: asyncpg>=0.29.0
+Requires-Dist: aiofiles>=23.2.1
+Requires-Dist: anyio>=4.2.0
+Requires-Dist: tree-sitter>=0.20.4
+Requires-Dist: uvloop>=0.19.0; sys_platform != "win32"
+Requires-Dist: llama-index-embeddings-huggingface>=0.5.2
+Requires-Dist: llama-index-core>=0.12.22
+Requires-Dist: hf-transfer>=0.1.9
+Requires-Dist: llama-index-vector-stores-lancedb>=0.3.0
+Requires-Dist: fpdf>=1.7.2
+Requires-Dist: fastapi>=0.110.0
+Requires-Dist: uvicorn>=0.28.0
+Requires-Dist: jinja2>=3.1.2
+Requires-Dist: websockets>=12.0.0
+Requires-Dist: ipython>=8.12.0
+Requires-Dist: pydantic>=2.5.2
+Requires-Dist: griffe>=1.6.0
+Requires-Dist: pydantic-settings>=2.8.1
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23.0; extra == "dev"
+Requires-Dist: black>=23.7.0; extra == "dev"
+Requires-Dist: isort>=5.12.0; extra == "dev"
+Requires-Dist: mypy>=1.5.0; extra == "dev"
+
+# Finite Monkey Engine
+
+A comprehensive smart contract security analysis framework with multi-agent architecture and asynchronous processing.
+
+## Features
+
+- **Asynchronous Architecture**: Fully asynchronous workflow processing for handling large codebases efficiently
+- **Multi-LLM Support**: Supports multiple LLM providers (Ollama, Claude, OpenAI) for different analysis tasks
+- **Specialized Agents**: Dedicated agents for research, validation, and documentation
+- **Vector Store Integration**: LlamaIndex-based vector store for efficient code analysis
+- **TreeSitter Analysis**: Semantic code analysis using TreeSitter
+- **Web Interface**: Interactive web interface for project management and result visualization
+
+## Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/a-finite-monkey-engine.git
+cd a-finite-monkey-engine
+
+# Install dependencies with uv (recommended)
+uv pip install -e .
+
+# Or with pip
+pip install -e .
+```
+
+## Configuration
+
+Finite Monkey Engine is configured through environment variables, `.env` file, or command-line arguments. Key configurations:
+
+- `WORKFLOW_MODEL`: Default LLM model for workflow
+- `CLAUDE_API_KEY`: API key for Claude integration
+- `OPENAI_API_BASE`: Base URL for OpenAI/Ollama API
+- `VECTOR_STORE_PATH`: Path to LanceDB vector store
+
+## Usage
+
+### Command Line Interface
+
+```bash
+# Analyze a single contract
+./run.py analyze -f examples/Vault.sol
+
+# Analyze all contracts in a directory
+./run.py analyze -d examples/
+
+# Generate visualization for a contract
+./run.py visualize examples/Vault.sol
+
+# Analyze contracts and generate visualization
+./run.py full-audit -f examples/Vault.sol
+```
+
+### Python API
+
+```python
+from finite_monkey.agents import WorkflowOrchestrator
+
+async def main():
+    orchestrator = WorkflowOrchestrator()
+    
+    # Run a complete audit
+    report = await orchestrator.run_audit(
+        solidity_path="examples/Vault.sol",
+        query="Check for reentrancy vulnerabilities"
+    )
+    
+    # Save the report
+    await report.save("report.md")
+
+# Run with asyncio
+import asyncio
+asyncio.run(main())
+```
+
+## Web Interface
+
+```bash
+# Start the web interface
+python -m finite_monkey web
+```
+
+## Development
+
+See `NEXT_STEPS.md` for current roadmap and priorities.
+
+## License
+
+MIT

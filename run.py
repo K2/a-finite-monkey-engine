@@ -4,6 +4,9 @@ Run script for the Finite Monkey framework
 
 This script provides a unified command-line interface for the various
 components of the Finite Monkey smart contract security analysis framework.
+
+It supports a "zero-configuration" mode when run without arguments for
+quick testing and debugging.
 """
 
 import os
@@ -11,159 +14,441 @@ import sys
 import asyncio
 import argparse
 from datetime import datetime
+from pathlib import Path
 
 from finite_monkey.agents import WorkflowOrchestrator
 from finite_monkey.visualization import GraphFactory
+from finite_monkey.nodes_config import nodes_config
+
+
+# Zero-configuration default mode when no arguments are provided
+async def run_default_analysis():
+    """
+    Run a default analysis with zero-configuration
+    
+    This provides a simple "just works" approach for quick usage and debugging.
+    It will:
+    1. Use the default example contract
+    2. Run a comprehensive security audit
+    3. Save the report to the reports directory
+    """
+    print("=" * 60)
+    print("Finite Monkey Engine - Default Analysis Mode")
+    print("=" * 60)
+    print("Running with default settings (zero-configuration mode)")
+    
+    # Create the orchestrator with default settings
+    orchestrator = WorkflowOrchestrator()
+    
+    try:
+        # Run audit with defaults (will use example/Vault.sol if available)
+        report = await orchestrator.run_audit()
+        
+        # Create a reports directory if it doesn't exist
+        reports_dir = Path("reports")
+        reports_dir.mkdir(exist_ok=True)
+        
+        # Save to a default location
+        report_path = reports_dir / f"{report.project_name}_report_{report.timestamp}.md"
+        await report.save(str(report_path))
+        
+        print("\nAnalysis complete!")
+        print(f"Report saved to: {report_path}")
+        
+        # Print findings summary
+        print_findings_summary(report)
+        
+        return 0
+    except Exception as e:
+        print(f"Error in default analysis: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return 1
 
 
 async def main():
     """
     Main entry point for the Finite Monkey framework
     """
-    parser = argparse.ArgumentParser(
-        description="Finite Monkey - Smart Contract Audit & Analysis Framework",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Analyze a single contract
-  ./run.py analyze -f examples/Vault.sol
-  
-  # Analyze all contracts in a directory
-  ./run.py analyze -d examples/
-  
-  # Generate visualization for a contract
-  ./run.py visualize examples/Vault.sol
-  
-  # Analyze contracts and generate visualization in one step
-  ./run.py full-audit -f examples/Vault.sol
-        """
-    )
-    
-    # Set up subparsers
-    subparsers = parser.add_subparsers(dest="command", help="Command to run")
-    
-    # Analysis command
-    analyze_parser = subparsers.add_parser("analyze", help="Analyze smart contracts for security vulnerabilities")
-    
-    # Required arguments - file or directory
-    file_group = analyze_parser.add_mutually_exclusive_group(required=True)
-    file_group.add_argument(
-        "-f", "--file",
-        help="Path to a single Solidity file to audit",
-    )
-    file_group.add_argument(
-        "-d", "--directory",
-        help="Path to a directory containing Solidity files to audit",
-    )
-    file_group.add_argument(
-        "--files",
-        nargs="+",
-        help="Multiple Solidity files to audit (space-separated)",
-    )
-    
-    # Optional arguments
-    analyze_parser.add_argument(
-        "-q", "--query",
-        default="Perform a comprehensive security audit",
-        help="Audit query (e.g., 'Check for reentrancy vulnerabilities')",
-    )
-    
-    analyze_parser.add_argument(
-        "--pattern",
-        default="*.sol",
-        help="Glob pattern for Solidity files when using --directory (default: *.sol)",
-    )
-    
-    analyze_parser.add_argument(
-        "-n", "--name",
-        help="Project name (defaults to filename or directory name)",
-    )
-    
-    analyze_parser.add_argument(
-        "-m", "--model",
-        default="llama3",
-        help="LLM model to use (default: llama3)",
-    )
-    
-    analyze_parser.add_argument(
-        "-o", "--output",
-        help="Output file for the report (default: <project>_report_<timestamp>.md)",
-    )
-    
-    analyze_parser.add_argument(
-        "--simple",
-        action="store_true",
-        help="Use the simple workflow instead of the atomic agent workflow",
-    )
-    
-    # Visualization command
-    visualize_parser = subparsers.add_parser("visualize", help="Generate visualization for smart contracts")
-    visualize_parser.add_argument(
-        "file_path",
-        help="Path to the Solidity file to visualize",
-    )
-    
-    visualize_parser.add_argument(
-        "-o", "--output",
-        help="Output HTML file for the visualization (default: <filename>_graph.html)",
-    )
-    
-    # Full audit command
-    full_parser = subparsers.add_parser("full-audit", help="Analyze and visualize smart contracts")
-    
-    # Required arguments - file or directory
-    file_group = full_parser.add_mutually_exclusive_group(required=True)
-    file_group.add_argument(
-        "-f", "--file",
-        help="Path to a single Solidity file to audit",
-    )
-    file_group.add_argument(
-        "-d", "--directory",
-        help="Path to a directory containing Solidity files to audit",
-    )
-    file_group.add_argument(
-        "--files",
-        nargs="+",
-        help="Multiple Solidity files to audit (space-separated)",
-    )
-    
-    # Optional arguments
-    full_parser.add_argument(
-        "-q", "--query",
-        default="Perform a comprehensive security audit",
-        help="Audit query (e.g., 'Check for reentrancy vulnerabilities')",
-    )
-    
-    full_parser.add_argument(
-        "--pattern",
-        default="*.sol",
-        help="Glob pattern for Solidity files when using --directory (default: *.sol)",
-    )
-    
-    full_parser.add_argument(
-        "-n", "--name",
-        help="Project name (defaults to filename or directory name)",
-    )
-    
-    full_parser.add_argument(
-        "-m", "--model",
-        default="llama3",
-        help="LLM model to use (default: llama3)",
-    )
-    
-    full_parser.add_argument(
-        "-o", "--output-dir",
-        default="reports",
-        help="Output directory for reports and visualizations (default: reports/)",
-    )
-    args = parser.parse_args()
-    
-    # Parse arguments
+    # Initialize settings from all sources (pydantic-settings automatically handles precedence)
+    # Order of precedence: class-default → pyproject.toml → .env → env vars → cmdline args
+    config = nodes_config()
     
     # Check if command was provided
-    if not args.command:
-        parser.print_help()
+    if len(sys.argv) < 2 or sys.argv[1] in ('-h', '--help'):
+        print_help(config)
         return 0
+    
+    command = sys.argv[1]
+    
+    # Handle commands
+    if command == "analyze":
+        # For compatibility with argparse version, extract arguments
+        file_path = get_arg_value(["-f", "--file"], None)
+        directory = get_arg_value(["-d", "--directory"], None)
+        files = get_arg_list("--files")
+        query = get_arg_value(["-q", "--query"], config.USER_QUERY or "Perform a comprehensive security audit")
+        pattern = get_arg_value(["--pattern"], "*.sol")
+        project_name = get_arg_value(["-n", "--name"], config.id)
+        model = get_arg_value(["-m", "--model"], config.WORKFLOW_MODEL or "llama3")
+        output = get_arg_value(["-o", "--output"], str(Path(config.output) / "<project>_report_<timestamp>.md"))
+        simple = "--simple" in sys.argv
+        
+        # Determine the input files
+        solidity_files = get_solidity_files_from_args(file_path, directory, files, pattern)
+        if not solidity_files:
+            return 1
+        
+        # Run analysis
+        return await run_analyze(
+            solidity_files=solidity_files,
+            query=query,
+            project_name=project_name,
+            model=model,
+            output=output,
+            simple=simple,
+            config=config
+        )
+    
+    elif command == "visualize":
+        # Get required file_path (positional argument after command)
+        if len(sys.argv) < 3:
+            print("Error: Missing file path for visualization")
+            return 1
+            
+        file_path = sys.argv[2]
+        output = get_arg_value(["-o", "--output"], str(Path(config.output) / "<filename>_graph.html"))
+        
+        # Run visualization
+        return await run_visualize(
+            file_path=file_path,
+            output=output,
+            config=config
+        )
+    
+    elif command == "full-audit":
+        # Extract arguments
+        file_path = get_arg_value(["-f", "--file"], None)
+        directory = get_arg_value(["-d", "--directory"], None)
+        files = get_arg_list("--files")
+        query = get_arg_value(["-q", "--query"], config.USER_QUERY or "Perform a comprehensive security audit")
+        pattern = get_arg_value(["--pattern"], "*.sol")
+        project_name = get_arg_value(["-n", "--name"], config.id)
+        model = get_arg_value(["-m", "--model"], config.WORKFLOW_MODEL or "llama3")
+        output_dir = get_arg_value(["-o", "--output-dir"], config.output)
+        
+        # Determine the input files
+        solidity_files = get_solidity_files_from_args(file_path, directory, files, pattern)
+        if not solidity_files:
+            return 1
+            
+        # Run full audit
+        return await run_full_audit(
+            solidity_files=solidity_files,
+            query=query,
+            project_name=project_name,
+            model=model,
+            output_dir=output_dir,
+            config=config
+        )
+    
+    else:
+        print(f"Unknown command: {command}")
+        print_help(config)
+        return 1
+
+
+def print_help(config):
+    """Print help message"""
+    print("Finite Monkey - Smart Contract Audit & Analysis Framework\n")
+    print("Commands:")
+    print("  analyze     Analyze smart contracts for security vulnerabilities")
+    print("  visualize   Generate visualization for smart contracts")
+    print("  full-audit  Analyze and visualize smart contracts\n")
+    
+    print("Examples:")
+    print("  # Analyze a single contract")
+    print("  ./run.py analyze -f examples/Vault.sol\n")
+    
+    print("  # Analyze all contracts in a directory")
+    print("  ./run.py analyze -d examples/\n")
+    
+    print("  # Generate visualization for a contract")
+    print("  ./run.py visualize examples/Vault.sol\n")
+    
+    print("  # Analyze contracts and generate visualization")
+    print("  ./run.py full-audit -f examples/Vault.sol\n")
+    
+    print("For help on specific commands, use: ./run.py <command> --help")
+
+
+def get_arg_value(options, default=None):
+    """Get argument value from command line"""
+    for i, arg in enumerate(sys.argv):
+        for option in options:
+            if arg == option and i + 1 < len(sys.argv):
+                return sys.argv[i + 1]
+    return default
+
+
+def get_arg_list(option):
+    """Get list argument value from command line"""
+    for i, arg in enumerate(sys.argv):
+        if arg == option and i + 1 < len(sys.argv):
+            # Collect all arguments that don't start with '-'
+            result = []
+            j = i + 1
+            while j < len(sys.argv) and not sys.argv[j].startswith('-'):
+                result.append(sys.argv[j])
+                j += 1
+            return result
+    return None
+
+
+def get_solidity_files_from_args(file_path, directory, files, pattern):
+    """Get Solidity files from arguments"""
+    solidity_files = []
+    
+    if file_path:
+        # Single file mode
+        if not os.path.isfile(file_path):
+            print(f"Error: File not found: {file_path}")
+            return []
+        solidity_files = [file_path]
+    elif directory:
+        # Directory mode
+        if not os.path.isdir(directory):
+            print(f"Error: Directory not found: {directory}")
+            return []
+        
+        import glob
+        # Find all Solidity files matching the pattern in the directory
+        glob_pattern = os.path.join(directory, pattern)
+        solidity_files = glob.glob(glob_pattern)
+        
+        if not solidity_files:
+            print(f"Error: No files matching pattern '{pattern}' found in {directory}")
+            return []
+    elif files:
+        # Multiple files mode
+        for file_path in files:
+            if not os.path.isfile(file_path):
+                print(f"Warning: File not found: {file_path}")
+            else:
+                solidity_files.append(file_path)
+        
+        if not solidity_files:
+            print("Error: None of the specified files were found")
+            return []
+    
+    return solidity_files
+
+
+async def run_analyze(solidity_files, query, project_name, model, output, simple, config):
+    """Run the analyze command"""
+    # Set default project name if not provided
+    project_name = get_project_name(project_name, solidity_files, config)
+    
+    # Set default output file if not provided
+    output_file = output
+    if "<project>" in output_file:
+        # Replace placeholder with actual project name
+        output_file = output_file.replace("<project>", project_name)
+    if "<timestamp>" in output_file:
+        # Replace placeholder with actual timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = output_file.replace("<timestamp>", timestamp)
+    
+    # Ensure output directory exists
+    os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
+    
+    # Print banner
+    print_banner("Finite Monkey - Smart Contract Analyzer", [
+        f"Project: {project_name}",
+        f"Files: {len(solidity_files)} Solidity file(s)",
+    ] + [f"  - {file}" for file in solidity_files[:5]] + 
+    ([f"  - ... and {len(solidity_files) - 5} more"] if len(solidity_files) > 5 else []) + [
+        f"Model: {model}",
+        f"Output: {output_file}",
+        f"Workflow: {'Simple' if simple else 'Atomic Agent'}"
+    ])
+    
+    # Initialize the workflow orchestrator
+    orchestrator = WorkflowOrchestrator(
+        model_name=model,
+    )
+    
+    # Run the appropriate workflow
+    print(f"Starting {'simple' if simple else 'atomic agent'} workflow...")
+    
+    if simple:
+        # Import the controller here to avoid circular imports
+        from finite_monkey.workflow import AgentController
+        from finite_monkey.adapters import Ollama
+        from finite_monkey.visualization import GraphFactory
+        
+        # Use the simple workflow for single files
+        if len(solidity_files) != 1:
+            print("Error: Simple workflow only supports a single file. Use the atomic agent workflow for multiple files.")
+            return 1
+        
+        # Initialize components - use model from args or config
+        model_name = model or config.WORKFLOW_MODEL
+        ollama_api_base = config.OPENAI_API_BASE  # Using OPENAI base as it's likely pointing to Ollama
+        
+        # Initialize components
+        ollama = Ollama(model=model_name, api_base=ollama_api_base)
+        controller = AgentController(ollama, model_name)
+        
+        # Read the file content
+        with open(solidity_files[0], "r", encoding="utf-8") as f:
+            code_content = f.read()
+        
+        # Run the simple workflow
+        await run_simple_workflow(
+            controller=controller,
+            ollama=ollama,
+            file_path=solidity_files[0],
+            code_content=code_content,
+            project_name=project_name,
+            output_file=output_file,
+            query=query,
+        )
+    else:
+        # Run the atomic agent workflow
+        report = await orchestrator.run_atomic_agent_workflow(
+            solidity_path=solidity_files,
+            query=query,
+            project_name=project_name,
+        )
+        
+        # Save the report
+        print(f"Saving report to {output_file}...")
+        await report.save(output_file)
+        
+        # Print findings summary
+        print_findings_summary(report)
+    
+    return 0
+
+
+async def run_visualize(file_path, output, config):
+    """Run the visualize command"""
+    # Validate file path
+    if not os.path.isfile(file_path):
+        print(f"Error: File not found: {file_path}")
+        return 1
+    
+    # Set default output file if not provided
+    output_file = output
+    filename = os.path.basename(file_path).split(".")[0]
+    
+    if "<filename>" in output_file:
+        # Replace placeholder with actual filename
+        output_file = output_file.replace("<filename>", filename)
+    
+    # Ensure output directory exists
+    os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
+    
+    # Print banner
+    print_banner("Finite Monkey - Contract Visualizer", [
+        f"File: {file_path}",
+        f"Output: {output_file}"
+    ])
+    
+    # Generate the visualization
+    print(f"Generating contract visualization...")
+    graph = GraphFactory.analyze_solidity_file(file_path)
+    
+    # Export as HTML
+    print(f"Exporting visualization to {output_file}...")
+    graph.export_html(output_file)
+    
+    print("\nVisualization generated successfully!")
+    print(f"Visualization saved to: {output_file}")
+    
+    return 0
+
+
+async def run_full_audit(solidity_files, query, project_name, model, output_dir, config):
+    """Run the full-audit command"""
+    # Set default project name if not provided
+    project_name = get_project_name(project_name, solidity_files, config)
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Generate output file paths
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_file = os.path.join(output_dir, f"{project_name}_report_{timestamp}.md")
+    graph_files = [os.path.join(output_dir, f"{os.path.basename(file).split('.')[0]}_graph_{timestamp}.html") 
+                 for file in solidity_files]
+    
+    # Also create a JSON results file
+    results_file = os.path.join(output_dir, f"{project_name}_results_{timestamp}.json")
+    
+    # Print banner
+    print_banner("Finite Monkey - Full Audit", [
+        f"Project: {project_name}",
+        f"Files: {len(solidity_files)} Solidity file(s)",
+    ] + [f"  - {file}" for file in solidity_files[:5]] + 
+    ([f"  - ... and {len(solidity_files) - 5} more"] if len(solidity_files) > 5 else []) + [
+        f"Model: {model}",
+        f"Output Directory: {output_dir}",
+        f"Report: {os.path.basename(report_file)}",
+        f"Results: {os.path.basename(results_file)}",
+        f"Visualizations: {len(graph_files)} files"
+    ])
+    
+    # Initialize the workflow orchestrator
+    orchestrator = WorkflowOrchestrator(
+        model_name=model,
+    )
+    
+    # Run the atomic agent workflow
+    print(f"Starting audit...")
+    report = await orchestrator.run_atomic_agent_workflow(
+        solidity_path=solidity_files,
+        query=query,
+        project_name=project_name,
+    )
+    
+    # Save the report
+    print(f"Saving report to {report_file}...")
+    await report.save(report_file)
+    
+    # Generate visualizations for each file
+    print(f"Generating contract visualizations...")
+    for i, file_path in enumerate(solidity_files):
+        graph_file = graph_files[i]
+        print(f"  Processing {os.path.basename(file_path)}...")
+        graph = GraphFactory.analyze_solidity_file(file_path)
+        graph.export_html(graph_file)
+    
+    # Save JSON results
+    import json
+    results_data = {
+        "project": project_name,
+        "timestamp": timestamp,
+        "files": solidity_files,
+        "model": model,
+        "query": query,
+        "findings": report.findings if hasattr(report, "findings") else [],
+    }
+    with open(results_file, "w", encoding="utf-8") as f:
+        json.dump(results_data, f, indent=2)
+    
+    # Print summary
+    print("\nAudit completed successfully!")
+    print(f"Project: {project_name}")
+    print(f"Report saved to: {report_file}")
+    print(f"Results saved to: {results_file}")
+    print(f"Visualizations saved to: {output_dir}/")
+    
+    # Print findings summary
+    print_findings_summary(report)
+    
+    return 0
     
     # Handle the analyze command
     if args.command == "analyze":
@@ -173,13 +458,17 @@ Examples:
             return 1
         
         # Set default project name if not provided
-        project_name = get_project_name(args, solidity_files)
+        project_name = get_project_name(args, solidity_files, config)
         
         # Set default output file if not provided
         output_file = args.output
-        if output_file is None:
+        if "<project>" in output_file:
+            # Replace placeholder with actual project name
+            output_file = output_file.replace("<project>", project_name)
+        if "<timestamp>" in output_file:
+            # Replace placeholder with actual timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_file = f"{project_name}_report_{timestamp}.md"
+            output_file = output_file.replace("<timestamp>", timestamp)
         
         # Ensure output directory exists
         os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
@@ -214,9 +503,13 @@ Examples:
                 print("Error: Simple workflow only supports a single file. Use the atomic agent workflow for multiple files.")
                 return 1
             
+            # Initialize components - use model from args or config
+            model = args.model or config.WORKFLOW_MODEL
+            ollama_api_base = config.OPENAI_API_BASE  # Using OPENAI base as it's likely pointing to Ollama
+            
             # Initialize components
-            ollama = Ollama(model=args.model)
-            controller = AgentController(ollama, args.model)
+            ollama = Ollama(model=model, api_base=ollama_api_base)
+            controller = AgentController(ollama, model)
             
             # Read the file content
             with open(solidity_files[0], "r", encoding="utf-8") as f:
@@ -235,7 +528,7 @@ Examples:
             )
         else:
             # Run the atomic agent workflow
-            report = orchestrator.run_atomic_agent_workflow(
+            report = await orchestrator.run_atomic_agent_workflow(
                 solidity_path=solidity_files,
                 query=args.query,
                 project_name=project_name,
@@ -257,9 +550,11 @@ Examples:
         
         # Set default output file if not provided
         output_file = args.output
-        if output_file is None:
-            filename = os.path.basename(args.file_path).split(".")[0]
-            output_file = f"{filename}_graph.html"
+        filename = os.path.basename(args.file_path).split(".")[0]
+        
+        if "<filename>" in output_file:
+            # Replace placeholder with actual filename
+            output_file = output_file.replace("<filename>", filename)
         
         # Ensure output directory exists
         os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
@@ -289,7 +584,7 @@ Examples:
             return 1
         
         # Set default project name if not provided
-        project_name = get_project_name(args, solidity_files)
+        project_name = get_project_name(args, solidity_files, config)
         
         # Create output directory if it doesn't exist
         os.makedirs(args.output_dir, exist_ok=True)
@@ -300,6 +595,9 @@ Examples:
         graph_files = [os.path.join(args.output_dir, f"{os.path.basename(file).split('.')[0]}_graph_{timestamp}.html") 
                      for file in solidity_files]
         
+        # Also create a JSON results file
+        results_file = os.path.join(args.output_dir, f"{project_name}_results_{timestamp}.json")
+        
         # Print banner
         print_banner("Finite Monkey - Full Audit", [
             f"Project: {project_name}",
@@ -309,6 +607,7 @@ Examples:
             f"Model: {args.model}",
             f"Output Directory: {args.output_dir}",
             f"Report: {os.path.basename(report_file)}",
+            f"Results: {os.path.basename(results_file)}",
             f"Visualizations: {len(graph_files)} files"
         ])
         
@@ -337,10 +636,24 @@ Examples:
             graph = GraphFactory.analyze_solidity_file(file_path)
             graph.export_html(graph_file)
         
+        # Save JSON results
+        import json
+        results_data = {
+            "project": project_name,
+            "timestamp": timestamp,
+            "files": solidity_files,
+            "model": args.model,
+            "query": args.query,
+            "findings": report.findings if hasattr(report, "findings") else [],
+        }
+        with open(results_file, "w", encoding="utf-8") as f:
+            json.dump(results_data, f, indent=2)
+        
         # Print summary
         print("\nAudit completed successfully!")
         print(f"Project: {project_name}")
         print(f"Report saved to: {report_file}")
+        print(f"Results saved to: {results_file}")
         print(f"Visualizations saved to: {args.output_dir}/")
         
         # Print findings summary
@@ -394,22 +707,34 @@ def get_solidity_files(args):
     return solidity_files
 
 
-def get_project_name(args, solidity_files):
+def get_project_name(args, solidity_files, config=None):
     """Get project name from arguments or files"""
+    # Check arguments first (highest precedence)
     if hasattr(args, 'name') and args.name:
         return args.name
     
+    # Next, try to infer from files
     if len(solidity_files) == 1:
         # Single file - use filename
         return os.path.basename(solidity_files[0]).split(".")[0]
-    else:
+    elif len(solidity_files) > 1:
         # Multiple files - try to use common directory name
         common_dir = os.path.commonpath([os.path.abspath(p) for p in solidity_files])
         project_name = os.path.basename(common_dir)
         if not project_name or project_name == ".":
-            # Fall back to timestamp-based name
-            project_name = f"solidity_project_{datetime.now().strftime('%Y%m%d')}"
+            # Fall back to config or timestamp-based name
+            if config and config.id and config.id != "default":
+                return config.id
+            else:
+                return f"solidity_project_{datetime.now().strftime('%Y%m%d')}"
         return project_name
+    
+    # Finally, fall back to config (lowest precedence)
+    if config and config.id:
+        return config.id
+    
+    # Ultimate fallback
+    return f"solidity_project_{datetime.now().strftime('%Y%m%d')}"
 
 
 def print_banner(title, lines=None):
@@ -562,6 +887,12 @@ async def run_simple_workflow(controller, ollama, file_path, code_content, proje
 
 
 if __name__ == "__main__":
-    # Run the main function with asyncio
-    exitcode = asyncio.run(main())
+    # Check if any arguments were provided
+    if len(sys.argv) == 1:
+        # No arguments, run in zero-configuration mode
+        exitcode = asyncio.run(run_default_analysis())
+    else:
+        # Arguments provided, run normal flow
+        exitcode = asyncio.run(main())
+    
     sys.exit(exitcode)
