@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+    
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v1
+        with:
+          version: "latest"
+      - name: Install dependencies
+        run: uv sync -p 3.12
+      - name: Mypy
+        run: uv run mypy autobot tests
+        
+#  uses: astral-sh/setup-uv
+#  with:
+    # The version of uv to install e.g., `0.5.0` Defaults to the version in pyproject.toml or 'latest'.#
+#    version: # optional, default is 
+    # Path to a pyproject.toml
+#    pyproject-file: pyproject.toml
+    # Path to a uv.toml
+#    uv-file: # optional, default is 
+    # The version of Python to set UV_PYTHON to
+#    python-version: # optional
+    # The checksum of the uv version to install
+#    checksum: # optional
+    # Used to increase the rate limit when retrieving versions and downloading uv.
+#    github-token: # optional, default is ${{ github.token }}
+    # Enable uploading of the uv cache
+#    enable-cache: # optional, default is auto
+    # Glob pattern to match files relative to the repository root to control the cache.
+#    cache-dependency-glob: 
+#      **/requirements*.txt
+
+    # Suffix for the cache key
+#    cache-suffix: # optional
+    # Local path to store the cache.
+#    cache-local-path: # optional, default is 
+    # Prune cache before saving.
+#    prune-cache: # optional, default is true
+    # Ignore when nothing is found to cache.
+#    ignore-nothing-to-cache: # optional, default is false
+    # Custom path to set UV_TOOL_DIR to.
+#    tool-dir: # optional
+    # Custom path to set UV_TOOL_BIN_DIR to.
+#    tool-bin-dir: # optional
+          
