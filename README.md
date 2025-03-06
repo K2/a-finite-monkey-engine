@@ -1,7 +1,7 @@
 # Finite Monkey Engine
 
 A comprehensive smart contract security analysis framework with multi-agent architecture and asynchronous processing.
-
+[![CI](https://github.com/K2/a-finite-monkey-engine/actions/workflows/python-publish.yml/badge.svg?branch=main)](https://github.com/K2/a-finite-monkey-engine/actions/workflows/python-publish.yml)
 ## Features
 
 - **Asynchronous Architecture**: Fully asynchronous workflow processing for handling large codebases efficiently
