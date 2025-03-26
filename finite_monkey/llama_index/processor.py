@@ -4,7 +4,7 @@ Asynchronous index processor for LlamaIndex integration.
 This module provides the main async interface for using LlamaIndex functionality
 in the Finite Monkey framework.
 """
-from .loaders import AsyncCodeLoader  # Make sure this import exists
+from .loaders import AsyncCodeLoader
 import asyncio
 import fnmatch
 import os
@@ -13,10 +13,9 @@ from typing import Any, Dict, List, Optional
 from llama_index.core import Settings
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.schema import Document
-from llama_index.core.vector_stores.types import MetadataFilter, MetadataFilters, VectorStoreQuery
+from llama_index.core.vector_stores.types import MetadataFilter, MetadataFilters, VectorStoreQuery, VectorStoreQueryResult
 
 from llama_index.vector_stores.lancedb import LanceDBVectorStore
-from .loaders import AsyncCodeLoader
 
 
 class AsyncIndexProcessor:
@@ -215,7 +214,17 @@ class AsyncIndexProcessor:
         )
 
         # Execute query asynchronously
-        query_result = await self.vector_store.query(query)
+        try:
+            query_result = await self.vector_store.query(query)
+        except Exception as e:
+            print(f"Error in vector store query: {e}")
+            # Create a fallback empty result
+            from llama_index.core.schema import NodeWithScore
+            query_result = VectorStoreQueryResult(
+                nodes=[],
+                similarities=[],
+                ids=[]
+            )
 
         # Format results
         result = {
@@ -269,7 +278,17 @@ class AsyncIndexProcessor:
         )
 
         # Execute query asynchronously
-        query_result = await self.vector_store.query(query)
+        try:
+            query_result = await self.vector_store.query(query)
+        except Exception as e:
+            print(f"Error in vector store similarity search: {e}")
+            # Create a fallback empty result
+            from llama_index.core.schema import NodeWithScore
+            query_result = VectorStoreQueryResult(
+                nodes=[],
+                similarities=[],
+                ids=[]
+            )
 
         # Format results
         results = []
@@ -299,12 +318,16 @@ class AsyncIndexProcessor:
         Returns:
             List of related functions
         """
-        # Filter to only include functions
-        filters = {"node_type": "function"}
+        try:
+            # Filter to only include functions
+            filters = {"node_type": "function"}
 
-        # Perform similarity search asynchronously
-        return await self.similarity_search(
-            query_text=function_code,
-            filters=filters,
-            top_k=top_k,
-        )
+            # Perform similarity search asynchronously
+            return await self.similarity_search(
+                query_text=function_code,
+                filters=filters,
+                top_k=top_k,
+            )
+        except Exception as e:
+            print(f"Error finding related functions: {e}")
+            return []

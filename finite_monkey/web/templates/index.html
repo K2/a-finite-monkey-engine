@@ -44,6 +44,22 @@
             <h2>IPython Terminal</h2>
             <p>Interactive debugging and exploration</p>
         </a>
+        
+        <a href="/github" class="menu-item">
+            <h2>GitHub Integration</h2>
+            <p>Import and analyze code from GitHub repositories</p>
+        </a>
+        
+        <a href="/reports" class="menu-item">
+            <h2>Analysis Reports</h2>
+            <p>View security audit results and findings</p>
+        </a>
+    </div>
+    
+    <div id="error-container" style="display: none; margin-top: 20px; padding: 15px; background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 5px; color: #721c24;">
+        <h3>Error</h3>
+        <p id="error-message"></p>
+        <button onclick="document.getElementById('error-container').style.display = 'none';">Dismiss</button>
     </div>
     
     <div style="margin-top: 40px; border-top: 1px solid #ccc; padding-top: 20px;">
@@ -54,6 +70,29 @@
     </div>
     
     <script>
+        // Error handling
+        function showError(message) {
+            const errorContainer = document.getElementById('error-container');
+            const errorMessage = document.getElementById('error-message');
+            
+            errorMessage.textContent = message;
+            errorContainer.style.display = 'block';
+            
+            // Log error to server
+            fetch('/api/errors', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    timestamp: new Date().toISOString(),
+                    message: message,
+                    url: window.location.href,
+                    user_agent: navigator.userAgent
+                })
+            }).catch(console.error);
+        }
+        
         // Fetch recent activity data
         async function loadRecentActivity() {
             try {
@@ -76,9 +115,69 @@
                         <p>Tasks completed: ${data.tasks_completed}</p>
                         <p>Tasks failed: ${data.tasks_failed}</p>
                     `;
+                    
+                    // Show error if there are failed tasks
+                    if (data.tasks_failed > 0) {
+                        activityDiv.innerHTML += `
+                            <div style="margin-top: 10px; padding: 10px; background-color: #fff3cd; border: 1px solid #ffeeba; border-radius: 5px;">
+                                <p><strong>Warning:</strong> ${data.tasks_failed} task(s) failed during execution.</p>
+                                <p>Check the <a href="/telemetry">Telemetry</a> page for details.</p>
+                            </div>
+                        `;
+                    }
+                    
+                    // Show recent reports if available
+                    if (data.tasks_completed > 0) {
+                        try {
+                            const reportsResponse = await fetch('/api/reports');
+                            const reports = await reportsResponse.json();
+                            
+                            if (reports.length > 0) {
+                                activityDiv.innerHTML += `
+                                    <div style="margin-top: 15px;">
+                                        <h4>Recent Reports</h4>
+                                        <ul>
+                                            ${reports.slice(0, 3).map(report => `
+                                                <li>
+                                                    <a href="/reports/${report.id}/view" target="_blank">
+                                                        ${report.project_name || report.id} 
+                                                        (${new Date(report.timestamp).toLocaleDateString()})
+                                                    </a>
+                                                </li>
+                                            `).join('')}
+                                        </ul>
+                                        <a href="/reports">View all reports</a>
+                                    </div>
+                                `;
+                            }
+                        } catch (error) {
+                            console.error('Error loading reports:', error);
+                        }
+                    }
                 }
             } catch (error) {
                 console.error('Error loading recent activity:', error);
+                showError('Error loading activity data: ' + error.message);
+            }
+        }
+        
+        // Start/Stop agent functionality
+        async function startStopAgent(action, agentType) {
+            try {
+                const response = await fetch(`/api/agents/${agentType}/${action}`, {
+                    method: 'POST'
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || `Failed to ${action} ${agentType} agent`);
+                }
+                
+                // Refresh activity data
+                loadRecentActivity();
+                
+            } catch (error) {
+                showError(`Error ${action}ing agent: ${error.message}`);
             }
         }
         
@@ -87,6 +186,11 @@
         
         // Refresh data every 5 seconds
         setInterval(loadRecentActivity, 5000);
+        
+        // Global error handler
+        window.addEventListener('error', function(event) {
+            showError(`JavaScript Error: ${event.message}`);
+        });
     </script>
 </body>
 </html>

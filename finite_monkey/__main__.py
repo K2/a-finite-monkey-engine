@@ -10,13 +10,15 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 
-from .agents import WorkflowOrchestrator
-from .nodes_config import nodes_config
+from nodes_config import nodes_config
 
 async def main():
     """
     Main entry point for the command-line interface
     """
+    # Import here to avoid circular imports
+    from agents import WorkflowOrchestrator
+    
     # Parse command-line arguments
     parser = argparse.ArgumentParser(
         description="Finite Monkey - Smart Contract Audit & Analysis Framework",
@@ -59,7 +61,7 @@ Examples:
     # Optional arguments
     analyze_parser.add_argument(
         "-q", "--query",
-        default=nodes_config.USER_QUERY or "Perform a comprehensive security audit",
+        default="Perform a comprehensive security audit",
         help="Audit query (e.g., 'Check for reentrancy vulnerabilities')",
     )
     
@@ -71,34 +73,34 @@ Examples:
     
     analyze_parser.add_argument(
         "-n", "--name",
-        default=nodes_config.id,
-        help=f"Project name (defaults to {nodes_config.id})",
+        default="default",
+        help="Project name (defaults to 'default')",
     )
     
     analyze_parser.add_argument(
         "-m", "--model",
-        default=nodes_config.WORKFLOW_MODEL or "llama3",
-        help=f"LLM model to use (default: {nodes_config.WORKFLOW_MODEL or 'llama3'})",
+        default="llama3",
+        help="LLM model to use (default: llama3)",
     )
     
     analyze_parser.add_argument(
         "-o", "--output",
-        default=str(Path(nodes_config.output) / "<project>_report_<timestamp>.md"),
-        help=f"Output file for the report (default: {nodes_config.output}/<project>_report_<timestamp>.md)",
+        default=str(Path("reports") / "<project>_report_<timestamp>.md"),
+        help="Output file for the report (default: reports/<project>_report_<timestamp>.md)",
     )
     
     # Web interface command
     web_parser = subparsers.add_parser("web", help="Start the web interface")
     web_parser.add_argument(
         "--host",
-        default=nodes_config.WEB_HOST or "0.0.0.0",
-        help=f"Host to bind to (default: {nodes_config.WEB_HOST or '0.0.0.0'})",
+        default="0.0.0.0",
+        help="Host to bind to (default: 0.0.0.0)",
     )
     web_parser.add_argument(
         "--port",
         type=int,
-        default=nodes_config.WEB_PORT or 8000,
-        help=f"Port to bind to (default: {nodes_config.WEB_PORT or 8000})",
+        default=8000,
+        help="Port to bind to (default: 8000)",
     )
     web_parser.add_argument(
         "--reload",
@@ -119,7 +121,7 @@ Examples:
     )
     github_parser.add_argument(
         "-q", "--query",
-        default=nodes_config.USER_QUERY or "Perform a comprehensive security audit",
+        default="Perform a comprehensive security audit",
         help="Audit query (e.g., 'Check for reentrancy vulnerabilities')",
     )
     github_parser.add_argument(
@@ -129,13 +131,13 @@ Examples:
     )
     github_parser.add_argument(
         "-m", "--model",
-        default=nodes_config.WORKFLOW_MODEL or "llama3",
-        help=f"LLM model to use (default: {nodes_config.WORKFLOW_MODEL or 'llama3'})",
+        default="llama3",
+        help="LLM model to use (default: llama3)",
     )
     github_parser.add_argument(
         "-o", "--output",
-        default=str(Path(nodes_config.output) / "<project>_report_<timestamp>.md"),
-        help=f"Output file for the report (default: {nodes_config.output}/<project>_report_<timestamp>.md)",
+        default=str(Path("reports") / "<project>_report_<timestamp>.md"),
+        help="Output file for the report (default: reports/<project>_report_<timestamp>.md)",
     )
     github_parser.add_argument(
         "--issues",
@@ -239,21 +241,23 @@ Examples:
             from .web.app import app
             
             # Set up database directory
-            db_dir = Path(nodes_config.DB_DIR)
+            db_dir = Path("db")
             db_dir.mkdir(exist_ok=True)
             
             # Set up outputs directory
-            output_dir = Path(nodes_config.output)
+            output_dir = Path("reports")
             output_dir.mkdir(exist_ok=True)
             
-            # Start Uvicorn server
-            uvicorn.run(
+            # Start Uvicorn server - need to handle it differently when we're already in an async context
+            config = uvicorn.Config(
                 "finite_monkey.web.app:app",
                 host=args.host,
                 port=args.port,
                 reload=args.reload or args.debug,
                 log_level="debug" if args.debug else "info",
             )
+            server = uvicorn.Server(config)
+            await server.serve()
             
         except Exception as e:
             print(f"Error starting web server: {str(e)}")

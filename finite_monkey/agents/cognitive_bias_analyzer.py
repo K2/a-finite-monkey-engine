@@ -189,7 +189,7 @@ class CognitiveBiasAnalyzer:
         )
         
         # Get analysis from LLM
-        response = await self.llm_client.completion(prompt=prompt)
+        response = await self.llm_client.acomplete(prompt=prompt)
         
         # Parse the response
         findings = self._parse_bias_findings(response, bias_type)
@@ -312,7 +312,7 @@ class CognitiveBiasAnalyzer:
         )
         
         # Get analysis from LLM
-        response = await self.llm_client.completion(prompt=prompt)
+        response = await self.llm_client.acomplete(prompt=prompt)
         
         # Parse response (basic implementation)
         assumptions = {}
@@ -381,11 +381,12 @@ class CognitiveBiasAnalyzer:
             )
             
             # Get remediation from LLM
-            response = await self.llm_client.completion(prompt=prompt)
+            response = await self.llm_client.acomplete(prompt=prompt)
             
             # Parse remediation (simplified implementation)
             remediation_steps = []
             current_step = None
+            in_code_block = False  # Initialize the code block flag
             
             for line in response.split("\n"):
                 line = line.strip()
@@ -406,7 +407,7 @@ class CognitiveBiasAnalyzer:
                     }
                 elif current_step:
                     # Check for code example
-                    if "```" in line:
+                    if "```" in line and not in_code_block:
                         in_code_block = True
                         current_step["code_example"] = ""
                     elif in_code_block:

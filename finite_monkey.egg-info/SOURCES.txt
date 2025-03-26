@@ -3,6 +3,9 @@ README.md
 pyproject.toml
 finite_monkey/__init__.py
 finite_monkey/__main__.py
+finite_monkey/app.py
+finite_monkey/core_async_analyzer.py
+finite_monkey/enhanced_async_analyzer.py
 finite_monkey/nodes_config.py
 finite_monkey.egg-info/PKG-INFO
 finite_monkey.egg-info/SOURCES.txt
@@ -10,4 +13,6 @@ finite_monkey.egg-info/dependency_links.txt
 finite_monkey.egg-info/entry_points.txt
 finite_monkey.egg-info/requires.txt
 finite_monkey.egg-info/top_level.txt
+tests/test_chunking.py
+tests/test_cognitive_bias.py
 tests/test_entrypoints.py

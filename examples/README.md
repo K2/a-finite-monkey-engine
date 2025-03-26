@@ -1,6 +1,48 @@
 # Finite Monkey Engine Examples
 
-This directory contains example Solidity contracts for testing the Finite Monkey Engine security analysis capabilities.
+This directory contains example code, deprecated components, reference implementations, and development utilities that are not part of the core codebase.
+
+## Directory Structure
+
+- **tests/**: Test files and test utilities moved out of the main codebase
+- **debug/**: Debugging utilities and development tools
+- **dev/**: Development configuration and setup files
+- **notebooks/**: Jupyter notebooks for experimentation
+- **starlight-prototype/**: Early iterations of Starlight UI components before they were finalized
+
+## Purpose
+
+This directory serves to keep the main codebase clean while preserving useful reference implementations. Files here:
+
+1. Are not required for core functionality
+2. May serve as examples or templates for users
+3. May be used for development or debugging but aren't part of production
+4. May contain deprecated code that we want to preserve for reference
+
+## Usage
+
+The examples and utilities in this directory are provided for reference only and may require additional setup to run.
+
+## Contents
+
+### Starlight Prototype
+Early iterations and experimental components from the Starlight UI development:
+
+- **components/**: Early component implementations before security and internationalization improvements
+- **pages/**: Prototype pages that were used during development
+- **utils/**: Utility modules replaced by more secure or specialized versions
+- **api/**: API endpoints that have been superseded by more specialized implementations
+
+## Usage
+
+These examples should not be used in production. They are kept for:
+1. Reference purposes
+2. Documentation of the development process
+3. Educational value for understanding the evolution of the codebase
+
+## Relationship to Main Codebase
+
+Files in this directory have been moved from the main codebase as they were replaced by improved implementations. The current working versions are in their respective locations in the main project structure.
 
 ## DeFi Project
 

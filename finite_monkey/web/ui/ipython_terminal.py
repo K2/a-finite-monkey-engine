@@ -89,6 +89,9 @@ try:
                 pass
     else:
         TS_LANGUAGES = {}
+except ImportError:
+    TREE_SITTER_AVAILABLE = False
+    TS_LANGUAGES = {}
 
 class IPythonTerminal:
     """
@@ -115,6 +118,12 @@ class IPythonTerminal:
         self.namespace.update({
             "terminal": self,
         })
+        
+        # Create a dummy file descriptor for prompt_toolkit
+        self._dummy_fd = None
+        
+        # Add encoding attribute required by prompt_toolkit
+        self.encoding = 'utf-8'
     
     def start(self):
         """Start the IPython terminal thread."""
@@ -132,6 +141,15 @@ class IPythonTerminal:
         if self.thread is not None:
             self.thread.join(timeout=1.0)
             self.thread = None
+            
+        # Clean up the file descriptor if it exists
+        if self._dummy_fd is not None:
+            import os
+            try:
+                os.close(self._dummy_fd)
+            except OSError:
+                pass
+            self._dummy_fd = None
     
     def _run_ipython(self):
         """Run IPython in a separate thread."""
@@ -148,12 +166,32 @@ class IPythonTerminal:
             
             # Import IPython
             from IPython import start_ipython
+            from traitlets.config.loader import Config
+            import os
             
-            # Start IPython
+            # Set environment variables for proper color rendering
+            os.environ['TERM'] = 'xterm-256color'
+            os.environ['FORCE_COLOR'] = '1'
+            os.environ['PYTHONIOENCODING'] = 'utf-8'
+            
+            # Configure IPython to disable cursor position requests
+            # and properly handle colors in web environment
+            c = Config()
+            c.TerminalInteractiveShell.term_title = False
+            c.TerminalInteractiveShell.colors = 'linux'  # Use lowercase as recommended
+            c.TerminalInteractiveShell.simple_prompt = True  # Disable fancy prompts
+            c.TerminalInteractiveShell.display_completions = 'readlinelike'
+            c.TerminalInteractiveShell.banner1 = 'Welcome to the Finite Monkey IPython Terminal!\nType Python commands to interact with the framework.\n'
+            c.TerminalInteractiveShell.confirm_exit = False
+            
+            # App configuration
+            c.TerminalIPythonApp.display_banner = False
+            
+            # Start IPython with configuration
             start_ipython(
-                argv=[],
+                argv=['--no-banner'],
                 user_ns=self.namespace,
-                display_banner=False
+                config=c
             )
         finally:
             # Restore original stdin/stdout/stderr
@@ -167,7 +205,27 @@ class IPythonTerminal:
     def write(self, data):
         """Write data to the output queue (used for stdout/stderr)."""
         if data:
-            self.output_queue.put(data)
+            # Replace escape sequences that might confuse the terminal
+            # But preserve ANSI color codes which will be handled by client-side JS
+            clean_data = data
+            
+            # Remove cursor up/down/forward/backward commands
+            ansi_cursor_pattern = re.compile(r'\x1b\[\d*[ABCDEFGJKST]')
+            clean_data = ansi_cursor_pattern.sub('', clean_data)
+            
+            # Remove terminal title setting
+            if '\x1b]0;' in clean_data:
+                clean_data = re.sub(r'\x1b\]0;.*?\x07', '', clean_data)
+            
+            # Remove terminal clear screen
+            clean_data = clean_data.replace('\x1b[2J', '')
+            
+            # Remove cursor position requests
+            clean_data = re.sub(r'\x1b\[\d*n', '', clean_data)
+            
+            # Queue the clean data for output
+            self.output_queue.put(clean_data)
+            
         return len(data) if data else 0
     
     def flush(self):
@@ -183,6 +241,21 @@ class IPythonTerminal:
     def isatty(self):
         """Return whether this is a TTY-like device."""
         return True
+        
+    def fileno(self):
+        """
+        Return a file descriptor for this terminal.
+        
+        This is required by prompt_toolkit. We create a pipe and return
+        the write end as a dummy file descriptor.
+        """
+        if self._dummy_fd is None:
+            import os
+            # Create a pipe - we only need the write end
+            r, w = os.pipe()
+            os.close(r)  # Close the read end as we don't need it
+            self._dummy_fd = w
+        return self._dummy_fd
     
     def send_input(self, data):
         """Send input to the IPython console."""
@@ -280,6 +353,7 @@ class IPythonTerminal:
         
         try:
             # Send the code to the console
+            print(f"\n>> Executing: {code}")  # Print for debugging
             for line in code.strip().split("\n"):
                 self.send_input(line)
             
@@ -287,37 +361,49 @@ class IPythonTerminal:
             # This is a simple implementation that could be improved
             # by checking for IPython prompts or other indicators
             import time
-            max_wait = 5.0  # Maximum wait time in seconds
+            max_wait = 10.0  # Maximum wait time in seconds (increased for longer executions)
             wait_increment = 0.1
             total_wait = 0.0
             
             # Wait initially to let the code start running
-            time.sleep(0.2)
+            time.sleep(0.3)
             
             # Then check periodically if there's more output
             last_size = 0
+            last_output_time = time.time()
+            
             while total_wait < max_wait:
                 # Get current output size
                 current_output = self.get_output()
                 current_size = len(current_output)
                 
-                # If output has grown, reset the timer
+                # If output has grown, reset idle timer
                 if current_size > last_size:
                     last_size = current_size
-                    total_wait = 0
+                    last_output_time = time.time()
                 
-                # Otherwise increment wait time
+                # Sleep between checks
                 time.sleep(wait_increment)
                 total_wait += wait_increment
                 
-                # If no output for a while, break
-                if total_wait >= 1.0 and current_size == last_size:
+                # If no output for a while and we have output, break
+                idle_time = time.time() - last_output_time
+                if current_size > 0 and idle_time >= 0.8:
                     break
+            
+            # One final delay to ensure all output is captured
+            time.sleep(0.2)
             
             # Return the final output
             output = self.get_output()
+            
+            # Print the output for debugging
+            print(f"Output length: {len(output)}")
+            if output and len(output) < 100:
+                print(f"Output preview: {output}")
+                
             if not output:
-                return "Command executed (no output)"
+                return ""
             
             # Apply syntax highlighting if requested
             if highlight:
@@ -337,7 +423,9 @@ class IPythonTerminal:
             return output
             
         except Exception as e:
-            return f"Error executing code: {str(e)}"
+            error_message = f"Error executing code: {str(e)}"
+            print(error_message)  # Print for server-side debugging
+            return error_message
     
     def _extract_code_blocks(self, text):
         """
@@ -414,14 +502,21 @@ class AsyncIPythonBridge:
     async def _poll_output(self):
         """Poll the terminal for output."""
         while True:
-            # Check for output
-            if self.terminal.has_output():
-                output = self.terminal.get_output()
-                if output and self._output_callback:
-                    await self._output_callback(output)
-            
-            # Wait a short time
-            await asyncio.sleep(0.1)
+            try:
+                # Check for output
+                if self.terminal.has_output():
+                    output = self.terminal.get_output()
+                    if output and self._output_callback:
+                        await self._output_callback(output)
+                        # Print only in debug mode - commented out for production
+                        # print(f"Broadcasting output: {len(output)} chars")
+                
+                # Wait a short time
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                print(f"Error in output polling: {e}")
+                # Continue polling even if there's an error
+                await asyncio.sleep(1.0)
     
     async def run_code(self, code: str, highlight: bool = True) -> str:
         """
@@ -459,6 +554,15 @@ class AsyncIPythonBridge:
             lambda: self.terminal.highlight_code(code, language)
         )
         return result
+    
+    def get_output(self) -> str:
+        """
+        Get the current output from the terminal.
+        
+        Returns:
+            The current output as a string
+        """
+        return self.terminal.get_output()
     
     def set_output_callback(self, callback: Callable[[str], None]):
         """

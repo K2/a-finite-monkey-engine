@@ -1,11 +1,51 @@
 """
-Analysis models for the Finite Monkey framework
+Models for analysis results from various analyzers
 """
 
-from typing import Dict, List, Optional, Any, Dict
+from typing import Dict, List, Optional, Any
 from datetime import datetime
+from dataclasses import dataclass, field
 
-from pydantic import BaseModel, Field, root_validator
+from pydantic import BaseModel, Field, model_validator
+
+
+@dataclass
+class BiasAnalysisResult:
+    """Cognitive bias analysis results"""
+    contract_name: str
+    file_path: str
+    biases: Dict[str, List[Dict[str, Any]]]  # bias_type -> instances
+    analysis_date: Optional[datetime] = None
+    
+    def __post_init__(self):
+        if self.analysis_date is None:
+            self.analysis_date = datetime.now()
+
+
+@dataclass
+class AssumptionAnalysis:
+    """Analysis of developer assumptions"""
+    assumptions: List[Dict[str, str]]
+    summary: str
+    analysis_date: Optional[datetime] = None
+    
+    def __post_init__(self):
+        if self.analysis_date is None:
+            self.analysis_date = datetime.now()
+
+
+@dataclass
+class CounterfactualScenario:
+    """A counterfactual scenario for smart contract analysis"""
+    title: str
+    category: str
+    description: str
+    impact: str
+    likelihood: str
+    severity: str
+    mitigation: str
+    function: Optional[str] = None
+    location: Optional[str] = None
 
 
 class CodeAnalysis(BaseModel):
@@ -175,23 +215,23 @@ class BiasAnalysisResult(BaseModel):
     has_critical_biases: bool = Field(False, description="Whether critical bias-related issues were identified")
     timestamp: Optional[str] = Field(None, description="Timestamp of the analysis")
     
-    @root_validator
-    def check_critical_biases(cls, values):
+    @model_validator(mode='after')
+    def check_critical_biases(self):
         """Check if there are any critical bias-related issues"""
-        findings = values.get("bias_findings", {})
+        findings = self.bias_findings
         
         for bias_type, bias_data in findings.items():
             instances = bias_data.get("instances", [])
             for instance in instances:
                 if instance.get("severity", "").lower() == "critical":
-                    values["has_critical_biases"] = True
+                    self.has_critical_biases = True
                     break
         
         # Set timestamp if not provided
-        if not values.get("timestamp"):
-            values["timestamp"] = datetime.now().isoformat()
+        if not self.timestamp:
+            self.timestamp = datetime.now().isoformat()
             
-        return values
+        return self
     
     def get_summary(self) -> str:
         """Get a human-readable summary of the bias analysis"""
@@ -255,10 +295,10 @@ class AssumptionAnalysis(BaseModel):
     most_common_assumption: Optional[str] = Field(None, description="Most commonly occurring assumption")
     timestamp: Optional[str] = Field(None, description="Timestamp of the analysis")
     
-    @root_validator
-    def find_most_common(cls, values):
+    @model_validator(mode='after')
+    def find_most_common(self):
         """Find the most common assumption"""
-        assumptions = values.get("assumptions", {})
+        assumptions = self.assumptions
         
         if assumptions:
             # Count vulnerabilities per assumption
@@ -268,13 +308,14 @@ class AssumptionAnalysis(BaseModel):
             }
             
             # Find most common
-            values["most_common_assumption"] = max(counts.items(), key=lambda x: x[1])[0]
+            if counts:
+                self.most_common_assumption = max(counts.items(), key=lambda x: x[1])[0]
         
         # Set timestamp if not provided
-        if not values.get("timestamp"):
-            values["timestamp"] = datetime.now().isoformat()
+        if not self.timestamp:
+            self.timestamp = datetime.now().isoformat()
             
-        return values
+        return self
     
     def get_summary(self) -> str:
         """Get a human-readable summary of the assumption analysis"""

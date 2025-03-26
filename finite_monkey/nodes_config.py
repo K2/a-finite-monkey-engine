@@ -1,13 +1,14 @@
-from typing import Tuple, Type, Optional
+from typing import Tuple, Type, Optional, Dict, Any, List
+from box import Box
 from griffe import DocstringStyle
-from pydantic_settings import BaseSettings, CliPositionalArg, PydanticBaseSettingsSource, PyprojectTomlConfigSettingsSource, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, PyprojectTomlConfigSettingsSource, SettingsConfigDict
 from os import environ
 from pathlib import Path
 
 class Settings(BaseSettings):
     model_config:SettingsConfigDict = SettingsConfigDict(
         arbitrary_types_allowed=True,
-        cli_parse_args=True, 
+        cli_parse_args=False, 
         cli_prog_name='finite-monkey-engine',
         pyproject_toml_depth=1,
         pyproject_toml_table_header=('tool', 'finite-monkey-engine'),
@@ -26,20 +27,44 @@ class Settings(BaseSettings):
     src_dir: str = str(Path.cwd() / "src")
     output: str = str(Path.cwd() / "reports")
     
+    DEFAULT_MODEL:str = "dolphin3:8b-llama3.1-q8_0"
+    WORKFLOW_MODEL:str ="dolphin3:8b-llama3.1-q8_0"  # Set default
+    BUSINESS_FLOW_MODEL:str ="dolphin3:8b-llama3.1-q8_0"  # Set default
+    QUERY_MODEL:str="dolphin3:8b-llama3.1-q8_0"      # Set default
+    USER_QUERY:str="dolphin3:8b-llama3.1-q8_0"
+    SCAN_MODEL:str="dolphin3:8b-llama3.1-q8_0"
+    COGNITIVE_BIAS_MODEL:str="dolphin3:8b-llama3.1-q8_0"
+    DOCUMENTATION_MODEL:str="dolphin3:8b-llama3.1-q8_0"
+    COUNTERFACTUAL_MODEL:str="dolphin3:8b-llama3.1-q8_0"
+    VALIDATOR_MODEL:str = "dolphin3:8b-llama3.1-q8_0"
+    BUSINESS_FLOW_MODEL:str ="dolphin3:8b-llama3.1-q8_0"
+
+
     LANCEDB_URI: str = "lancedb_"
-    
-    WORKFLOW_MODEL:str =""
-    QUERY_MODEL:str=""
-    USER_QUERY:str=""
-    
+    BUSINESS_FLOW_MODEL_BASE_URL:str = "http://localhost:11434"
+    BUSINESS_FLOW_MODEL_PROVIDER:str = "ollama"
+    SCAN_MODEL_PROVIDER:str="ollama"
+    COGNITIVE_BIAS_MODEL_PROVIDER:str="ollama"
+    DOCUMENTATION_MODEL_PROVIDER:str="ollama"
+    COUNTERFACTUAL_MODEL_PROVIDER:str="ollama"
+    VALIDATOR_MODEL_PROVIDER:str="ollama"
+
+    VALIDATOR_MODEL_BASE_URL:str="http://127.0.0.1:11434/"
+    COGNITIVE_BIAS_MODEL_BASE_URL:str="http://127.0.0.1:11434/"
+    DOCUMENTATION_MODEL_BASE_URL:str="http://127.0.0.1:11434/"
+    COUNTERFACTUAL_MODEL_BASE_URL:str="http://127.0.0.1:11434/"
+    # Add DEFAULT_MODEL for backward compatibility
+    DEFAULT_PROVIDER:str = "ollama"
+    DEFAULT_BASE_URL:str = "http://127.0.0.1:11434/"
     # Database settings
+    SCAN_MODEL_BASE_URL:str = "http://127.0.0.1:11434/"
     DATABASE_URL: str = "postgresql://postgres:1234@127.0.0.1:5432/postgres"
     ASYNC_DB_URL: str = "postgresql+asyncpg://postgres:1234@127.0.0.1:5432/postgres"
     DATABASE_SQLITE: str = ""
     DATABASE_SETTINGS_URL: str = ""
     
     # AI Provider settings
-    AZURE_OR_OPENAI: str = "openai"
+    AZURE_OR_OPENAI: str = "ollama"
     
     # Azure settings
     AZURE_API_BASE: str = ""
@@ -48,9 +73,9 @@ class Settings(BaseSettings):
     AZURE_DEPLOYMENT_NAME: str = ""
     
     # OpenAI settings
-    OPENAI_API_BASE: str = "http://127.0.0.1:11434/v1"
+    OPENAI_API_BASE: str = "http://127.0.0.1:11434"
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4-turbo"
+    OPENAI_MODEL: str = "ollama"
     EMBEDDING_MODEL: str = "text-embedding-3-large"
     
     # Anthropic settings
@@ -86,6 +111,8 @@ class Settings(BaseSettings):
     # Performance settings
     MAX_THREADS_OF_SCAN: int = 8
     MAX_THREADS_OF_CONFIRMATION: int = 8
+    REQUEST_TIMEOUT: float = 300.0  # Add for adapter
+    MAX_RETRIES: int = 3  # Add for adapter
     BUSINESS_FLOW_COUNT: int = 10
     BUSINESS_FLOW_ANALYSIS_INTENSITY: float = 1.0
     
@@ -107,9 +134,9 @@ class Settings(BaseSettings):
     IGNORE_FOLDERS: str = "test"
     
     # Model selection settings
-    SCAN_MODEL: str = "OPENAI"
-    CONFIRMATION_MODEL: str = "CLAUDE"
-    RELATION_MODEL: str = "OPENAI"
+    SCAN_MODEL: str = "dolphin3:8b-llama3.1-q8_0"          # Set default
+    CONFIRMATION_MODEL: str = "dolphin3:8b-llama3.1-q8_0"  # Set default
+    RELATION_MODEL: str = "ollama"
     
     # Web interface settings
     WEB_INTERFACE: bool = False
@@ -127,6 +154,31 @@ class Settings(BaseSettings):
     # Code analysis settings
     ENABLE_SITTER_ENRICHMENT: bool = True  # Enable semantic code enrichment with tree-sitter
     
+    # Model parameters as a dictionary
+    MODEL_PARAMS: Dict[str, Dict[str, Any]] = {
+        "default": {
+            "temperature": 0.2,
+            "max_tokens": 8192,
+            "request_timeout": 300
+        },
+        "dolphin3:8b-llama3.1-q8_0": {
+            "temperature": 0.1,
+            "max_tokens": 8192,
+            "request_timeout": 300
+            
+        }
+    }
+    
+    # Supported models that can be used in the system
+    SUPPORTED_MODELS: Dict[str, List[str]] = {
+        "ollama": [
+            "dolphin3:8b-llama3.1-q8_0",
+            "llama3:8b-instruct-q8_0",
+            "codellama:13b-instruct-q8_0",
+            "mistral:7b-instruct-q8_0"
+        ]
+    }
+    
     @classmethod
     def settings_customise_sources(
         cls,
@@ -143,5 +195,5 @@ class Settings(BaseSettings):
             PyprojectTomlConfigSettingsSource(settings_cls),
         )
 
-# Simplified to use Settings directly for nodes_config
-nodes_config = Settings
+# Global settings instance
+config = Box(Settings(), frozen_box=False)

@@ -75,7 +75,7 @@ class DocumentationAnalyzer:
     def __init__(
         self,
         llm_client: Optional[Ollama] = None,
-        model_name: str = "llama3:70b-instruct-q6_K",
+        model_name: str = "qwen2.5-coder:7b",
     ):
         """
         Initialize the Documentation Analyzer agent

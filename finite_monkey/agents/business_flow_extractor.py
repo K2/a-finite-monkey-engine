@@ -242,11 +242,35 @@ class BusinessFlowExtractor:
                 function_signature=self._get_function_signature(func),
             )
             
-            # Get response from LLM
-            response = await self.ollama.acomplete(prompt=prompt)
-            
-            # Parse response
-            analysis = self._parse_function_analysis(response)
+            try:
+                # Send request to LLM
+                future = await self.llm_adapter.submit_json_prompt(
+                    prompt=prompt,
+                    schema=schema
+                )
+                
+                # Get result when ready with timeout
+                result = await asyncio.wait_for(asyncio.wrap_future(future), timeout=config.REQUEST_TIMEOUT)
+                
+                # Log metadata information for debugging and later analysis
+                if "notes" in result:
+                    logger.debug(f"Business flow notes for {function_name}: {result['notes']}")
+                if "confidence" in result:
+                    logger.info(f"Business flow confidence for {function_name}: {result.get('confidence', 0)}")
+                if "f1_score" in result:
+                    logger.info(f"Business flow f1_score for {function_name}: {result.get('f1_score', 0)}")
+                if "rfi" in result:
+                    logger.warning(f"Business flow RFI for {function_name}: {result.get('rfi', '')}")
+                
+                # Extract business flows from result
+                analysis = result.get("businessFlows", [])
+                
+            except asyncio.TimeoutError:
+                logger.error(f"LLM request timed out for function {function_name}")
+                analysis = []
+            except Exception as e:
+                logger.error(f"Error extracting business flows with LLM: {str(e)}")
+                analysis = []
             
             # Enrich with function metadata
             analysis["name"] = func_name

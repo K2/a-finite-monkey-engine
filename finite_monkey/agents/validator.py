@@ -10,25 +10,84 @@ import asyncio
 import json
 import re
 from typing import Dict, List, Optional, Any, Tuple
-
-from ..adapters import Ollama
-from ..models import CodeAnalysis, ValidationResult
-from ..models.analysis import ValidationIssue
-from ..utils.prompting import get_validation_prompt
+from tree_sitter import Tree, Node, TreeCursor, QueryPredicate, Parser, Query, Language, Point
+from tree_sitter_solidity import language
+from finite_monkey.adapters import Ollama
+from finite_monkey.models import CodeAnalysis, ValidationResult
+from finite_monkey.models.analysis import ValidationIssue
+from finite_monkey.utils.prompting import get_validation_prompt
 
 
 class TreeSitterAnalyzer:
     """
     Tree-sitter based static analyzer for code
     
-    This class is a placeholder for the actual tree-sitter analyzer
-    implementation. In a real implementation, this would use tree-sitter
-    for static analysis of code.
+    This analyzer uses tree-sitter for static code analysis if available,
+    otherwise falls back to regex-based analysis.
     """
     
     def __init__(self):
         """Initialize the tree-sitter analyzer"""
-        pass
+        self.tree_sitter_available = False
+        self.solidity_language = None
+        
+        # Try to initialize tree-sitter
+        try:
+            #from tree_sitter import Language, Parser
+            from tree_sitter import Tree, Node, TreeCursor, QueryPredicate, Parser, Query, Language, Point
+            from tree_sitter_solidity import language
+            
+            # Define path to language libraries (would be configured properly in production)
+            language_path = os.path.join(os.path.dirname(__file__), "../../tree_sitter_languages/libtree-sitter-solidity.so")
+            
+            # Check if the language file exists
+            if os.path.exists(language_path):
+                # Use the straightforward initialization that matches our tree-sitter version
+                try:
+                    # Create a specialized language module for Solidity
+                    import tree_sitter
+                    
+                    # Create a buffer for tree-sitter
+                    file_buffer = bytearray(1024*1024*2)  # 2MB buffer
+                    
+                    # Try multiple initialization patterns for different versions
+                    try:
+                        # First try: modern tree-sitter (0.20+)
+                        self.solidity_language =Language(language())
+                    except Exception as e1:
+                        try:
+                            # Second try: tree-sitter-solidity import
+                            try:
+                                from tree_sitter_solidity import language
+                                self.solidity_language =  Language(language())
+                            except ImportError:
+                                # Third try: with language ID
+                                self.solidity_language = Language(language_path, 'solidity')
+                        except Exception as e2:
+                            try:
+                                # Fourth try: legacy initialization with 0
+                                self.solidity_language = Language(language_path, 0)
+                            except Exception as e3:
+                                print(f"All tree-sitter initialization attempts failed:")
+                                print(f"  First attempt: {e1}")
+                                print(f"  Second attempt: {e2}")
+                                print(f"  Third attempt: {e3}")
+                                print("Falling back to regex analysis")
+                                return
+                    
+                    self.parser = Parser()
+                    self.tree_sitter_available = True
+                    print("Tree-sitter initialized successfully for Solidity")
+                except Exception as e:
+                    print(f"Tree-sitter initialization failed: {e}")
+                    print("Falling back to regex analysis")
+                    return
+            else:
+                print(f"Solidity language file not found at {language_path}, falling back to regex analysis")
+        except ImportError:
+            print("Tree-sitter not available, falling back to regex analysis")
+        except Exception as e:
+            print(f"Error initializing tree-sitter: {e}, falling back to regex analysis")
     
     async def analyze_code(
         self,
@@ -36,7 +95,7 @@ class TreeSitterAnalyzer:
         language: str = "solidity",
     ) -> Dict[str, Any]:
         """
-        Analyze code using tree-sitter
+        Analyze code using tree-sitter or regex fallback
         
         Args:
             code: Source code to analyze
@@ -45,14 +104,51 @@ class TreeSitterAnalyzer:
         Returns:
             Analysis results
         """
-        # This is a stub implementation
-        # In a real implementation, this would use tree-sitter
-        
-        # Simulate tree-sitter analysis with regex pattern matching
         results = {
             "patterns": {},
             "issues": [],
+            "using_tree_sitter": self.tree_sitter_available
         }
+        
+        # Use tree-sitter if available
+        if self.tree_sitter_available and language.lower() == "solidity":
+            try:
+                # Parse the code
+                tree = self.parser.parse(bytes(code, "utf8"))
+                
+                # Query for patterns
+                # This would be more sophisticated in a production environment
+                # with proper query patterns for different vulnerability types
+                
+                # Example patterns (simplified for demonstration)
+                patterns = {
+                    "unchecked_return": "(call_expression function: (member_expression property: (identifier) @method) @call) @call_expr",
+                    "reentrancy": "(member_expression property: (identifier) @prop (#match? @prop \"call\")) @call",
+                    "tx_origin": "(member_expression object: (identifier) @obj (#eq? @obj \"tx\") property: (identifier) @prop (#eq? @prop \"origin\")) @tx_origin",
+                    "timestamp_dependency": "(member_expression object: (identifier) @obj (#eq? @obj \"block\") property: (identifier) @prop (#eq? @prop \"timestamp\")) @timestamp",
+                }
+                
+                # Run each query and collect results
+                for name, query_str in patterns.items():
+                    try:
+                        query = self.solidity_language.query(query_str)
+                        matches = query.captures(tree.root_node)
+                        results["patterns"][name] = len(matches)
+                        
+                        # Add issues for matches (simplified for demonstration)
+                        # In production, you'd analyze the context more thoroughly
+                        self._add_issues_for_pattern(results, name, matches, code)
+                    except Exception as e:
+                        print(f"Error running tree-sitter query '{name}': {e}")
+                
+                return results
+            
+            except Exception as e:
+                print(f"Tree-sitter analysis failed: {e}, falling back to regex")
+                # Fall back to regex if tree-sitter fails
+                pass
+        
+        # Fallback: Use regex pattern matching
         
         # Define some simple patterns to look for
         patterns = {
@@ -109,6 +205,85 @@ class TreeSitterAnalyzer:
         
         # Return analysis results
         return results
+        
+    def _add_issues_for_pattern(self, results, pattern_name, matches, code):
+        """
+        Add issues based on tree-sitter matches
+        
+        Args:
+            results: Results dictionary to update
+            pattern_name: Name of the matched pattern
+            matches: Tree-sitter matches
+            code: Source code
+            
+        Returns:
+            None (updates results in place)
+        """
+        if not matches:
+            return
+            
+        # Create appropriate issues based on the pattern
+        if pattern_name == "unchecked_return":
+            results["issues"].append({
+                "title": "Unchecked Return Value",
+                "description": "Return values from external calls are not checked",
+                "severity": "Medium",
+                "locations": [self._get_node_location(match[0], code) for match in matches],
+            })
+        elif pattern_name == "reentrancy":
+            results["issues"].append({
+                "title": "Potential Reentrancy",
+                "description": "Low-level call with value transfer detected",
+                "severity": "High",
+                "locations": [self._get_node_location(match[0], code) for match in matches],
+            })
+        elif pattern_name == "tx_origin":
+            results["issues"].append({
+                "title": "tx.origin Usage",
+                "description": "tx.origin used for authorization",
+                "severity": "Medium",
+                "locations": [self._get_node_location(match[0], code) for match in matches],
+            })
+        elif pattern_name == "timestamp_dependency":
+            results["issues"].append({
+                "title": "Timestamp Dependency",
+                "description": "Contract relies on block.timestamp",
+                "severity": "Low",
+                "locations": [self._get_node_location(match[0], code) for match in matches],
+            })
+    
+    def _get_node_location(self, node, code):
+        """
+        Get location information for a tree-sitter node
+        
+        Args:
+            node: Tree-sitter node
+            code: Source code
+            
+        Returns:
+            Location information dictionary
+        """
+        start_point = node.start_point
+        end_point = node.end_point
+        
+        # Get line numbers (1-based)
+        start_line = start_point[0] + 1
+        end_line = end_point[0] + 1
+        
+        # Get line content
+        lines = code.splitlines()
+        if 0 <= start_point[0] < len(lines):
+            line_content = lines[start_point[0]]
+        else:
+            line_content = ""
+        
+        return {
+            "start_line": start_line,
+            "end_line": end_line,
+            "start_col": start_point[1],
+            "end_col": end_point[1],
+            "line_content": line_content
+        }
 
 
 class Validator:
@@ -125,7 +300,7 @@ class Validator:
         self,
         tree_sitter_analyzer: Optional[TreeSitterAnalyzer] = None,
         llm_client: Optional[Ollama] = None,
-        model_name: str = "llama3",
+        model_name: str = None,
     ):
         """
         Initialize the validator agent
@@ -135,9 +310,13 @@ class Validator:
             llm_client: Ollama client for validation
             model_name: Model to use for validation
         """
+        # Get model name from config if not provided
+        from ..nodes_config import nodes_config
+        config = nodes_config()
+        self.model_name = model_name or config.WORKFLOW_MODEL or "qwen2.5-coder:latest"
+        
         self.tree_sitter_analyzer = tree_sitter_analyzer or TreeSitterAnalyzer()
-        self.llm_client = llm_client or Ollama(model=model_name)
-        self.model_name = model_name
+        self.llm_client = llm_client or Ollama(model=self.model_name)
     
     async def validate_with_static_analysis_async(
         self,

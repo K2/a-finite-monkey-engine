@@ -1,24 +1,33 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "finite-monkey"
+name = "a-finite-monkey-engine"
 version = "0.1.0"
-description = "Smart Contract Audit & Analysis Framework"
+description = "Smart contract analysis engine using LLM"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+{ name = "Xue Yue", email = "nerbonic@gmail.com" },
+{ name = "Shane Macaulay", email = "k2@ktwo.ca" }
+]
 classifiers = [
+    "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Operating System :: OS Independent",
 ]
 dependencies = [
+    "ghapi>=0.1.19",
+    "loguru>=0.7.0",
+    "llama-cpp-python>=0.2.0",
     "llama-index[packets,utils]>=0.10.0",
     "httpx>=0.27.0",
     "SQLAlchemy>=2.0.25",
     "asyncpg>=0.29.0",
-    "aiofiles>=23.2.1",
     "anyio>=4.2.0",
     "tree-sitter>=0.20.4",
     "uvloop>=0.19.0; sys_platform != 'win32'",
@@ -35,47 +44,79 @@ dependencies = [
     "pydantic>=2.5.2",
     "griffe>=1.6.0",
     "pydantic-settings>=2.8.1",
+    "openzeppelin-solidity-grammar-parser>=0.0.5",
+    "aiofiles>=24.1.0",
+    "yappi>=1.6.10",
+    "ollama>=0.4.7",
+    "llama-index-llms-ollama>=0.5.3",
+    "tree-sitter-solidity>=1.2.11",
+    "streamlit>=1.43.2",
+    "python-box>=7.3.2",
+    "typer>=0.15.2",
+    "matplotlib>=3.10.1",
+    "llama-index-program-guidance>=0.3.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.4.0",
-    "pytest-asyncio>=0.23.0",
-    "black>=23.7.0",
-    "isort>=5.12.0",
-    "mypy>=1.5.0",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.20.0",
+    "black>=23.0.0",
+    "isort>=5.10.0",
+    "mypy>=1.0.0",
 ]
 
-[tool.finite-monkey-engine]
-WORKFLOW_MODEL=""
+[project.urls]
+"Homepage" = "https://github.com/yourusername/a-finite-monkey-engine"
+"Bug Tracker" = "https://github.com/yourusername/a-finite-monkey-engine/issues"
 
-[tool.setuptools]
-packages = ["finite_monkey"]
+[tool.finite-monkey-engine]
+# Default configuration values
+output = "reports"
+DEFAULT_MODEL = "hf.co/lmstudio-community/OlympicCoder-7B-GGUF:Q8_0"
+SCAN_MODEL = "hf.co/lmstudio-community/OlympicCoder-7B-GGUF:Q8_0"
+CONFIRMATION_MODEL = "hf.co/lmstudio-community/OlympicCoder-7B-GGUF:Q8_0"
+WORKFLOW_MODEL = "hf.co/lmstudio-community/OlympicCoder-7B-GGUF:Q8_0"
+QUERY_MODEL = "hf.co/lmstudio-community/OlympicCoder-7B-GGUF:Q8_0"
+MAX_THREADS_OF_SCAN = 4
+REQUEST_TIMEOUT = 300.0
+MAX_RETRIES = 5
+
 
 [project.scripts]
 finite-monkey = "finite_monkey.__main__:run_main"
 finite-monkey-web = "finite_monkey.web.app:run_server"
 
-[project.entry-points."console_scripts"]
-finite-monkey = "finite_monkey.__main__:run_main"
 
 [tool.black]
 line-length = 88
-target-version = ['py310']
+target-version = "py311"
 
 [tool.isort]
 profile = "black"
 line_length = 88
-
-[tool.mypy]
-python_version = "3.10"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
+multi_line_output = 3
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = "test_*.py"
 
-[tool.uv.sources]
-llama-index = { git = "https://github.com/run-llama/llama_index.git" }
+[tool.mypy]
+python_version = "3.11"
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+strict_optional = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unused_ignores = true
+warn_unreachable = true
+
+# UV specific settings for better dependency resolution
+[tool.uv]
+# You can specify resolution strategies, version constraints, etc.
+build-backend = "setuptools.build_meta"
+requires = ["setuptools>=42", "wheel"]
+

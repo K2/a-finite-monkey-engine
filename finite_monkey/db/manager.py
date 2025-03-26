@@ -19,7 +19,7 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
 from .models import Base, Project, File, Audit, Finding
-from ..nodes_config import nodes_config
+from finite_monkey.nodes_config import config  # Updated import
 
 
 class DatabaseManager:
@@ -46,6 +46,12 @@ class DatabaseManager:
         # Set default database URL if not provided
         if db_url is None:
             db_url = "sqlite+aiosqlite:///finite_monkey.db"
+        
+        # Ensure proper async driver for PostgreSQL
+        if db_url and "postgresql:" in db_url and "postgresql+asyncpg:" not in db_url:
+            db_url = db_url.replace("postgresql:", "postgresql+asyncpg:")
+            import logging
+            logging.getLogger(__name__).info(f"Converted database URL to use asyncpg: {db_url}")
         
         # Create engine and session factory
         self.engine = create_async_engine(db_url, echo=echo)
@@ -501,7 +507,7 @@ class TaskManager(DatabaseManager):
         super().__init__(db_url=db_url, echo=echo)
         
         # Get configuration
-        config = nodes_config()
+        #config = nodes_config()
         
         # Set task parameters
         self.max_concurrent_tasks = max_concurrent_tasks or config.MAX_THREADS_OF_SCAN

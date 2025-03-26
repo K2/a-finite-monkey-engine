@@ -208,12 +208,6 @@ class BusinessFlow(Base):
     parent_flow = relationship("BusinessFlow", remote_side=[id], backref="sub_flows")
 
 
-# Update existing Project class to include business flow tasks
-Project.business_flow_tasks = relationship("BusinessFlowTask", back_populates="project", 
-                                         primaryjoin="Project.project_id==BusinessFlowTask.project_id")
-Project.contracts = relationship("CodeContract", back_populates="project", cascade="all, delete-orphan")
-
-
 class Project(Base):
     """Project database model"""
     
@@ -305,3 +299,28 @@ class Finding(Base):
     
     # Relationships
     audit = relationship("Audit", back_populates="findings")
+
+
+# Add relationships after all classes are defined
+Project.business_flow_tasks = relationship("BusinessFlowTask", back_populates="project", 
+                                         primaryjoin="Project.project_id==BusinessFlowTask.project_id")
+Project.contracts = relationship("CodeContract", back_populates="project", cascade="all, delete-orphan")
+
+
+# Test expression model for vulnerability findings
+class TestExpression(Base):
+    """Test expression database model"""
+    
+    __tablename__ = "test_expressions"
+    
+    id = Column(Integer, primary_key=True)
+    project_id = Column(String(256), index=True)
+    file_id = Column(String(256), index=True)
+    expression = Column(Text, nullable=False)
+    expression_type = Column(String(32))  # pattern, flow, vulnerability
+    severity = Column(String(32), default="Medium")
+    confidence = Column(Float, default=0.5)
+    line_number = Column(Integer)
+    context = Column(Text)
+    expression_data = Column(JSON)  # Renamed from 'metadata' which is a reserved name
+    created_at = Column(DateTime, default=datetime.utcnow)

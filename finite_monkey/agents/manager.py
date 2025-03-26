@@ -16,7 +16,7 @@ from pathlib import Path
 
 from ..adapters import Ollama
 from ..models import AgentMetrics, ToolUsageMetrics
-from ..nodes_config import nodes_config
+from ..nodes_config import config
 
 
 class ManagerAgent:

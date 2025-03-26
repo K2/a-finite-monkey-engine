@@ -1,176 +1,137 @@
-# Asynchronous Workflow Architecture
+# Async Workflow Architecture for Finite Monkey Engine
 
-This document describes the architecture and implementation of the asynchronous workflow system in the Finite Monkey Engine.
+The async workflow architecture provides a fully asynchronous implementation of the Finite Monkey Engine's smart contract analysis pipeline with comprehensive flow analysis. This document outlines the components, flow, and technical design of the system.
 
-## Overview
+## Core Components
 
-The asynchronous workflow system is designed to enable:
+The async architecture consists of several key components:
 
-1. Parallel execution of tasks across multiple files
-2. Background processing of long-running tasks
-3. Task dependency management
-4. Automatic retry mechanisms
-5. Persistence of task state
+1. **ContractParser** - Parses Solidity contracts using Tree-Sitter for AST-based analysis
+2. **ControlFlowAnalyzer** - Extracts detailed control flow information with line numbers and context
+3. **ExpressionGenerator** - Creates and manages test expressions for detecting vulnerabilities
+4. **AsyncAnalyzer** - Coordinates the full analysis pipeline with asynchronous processing
+5. **DatabaseManager** - Provides async database access for persistent storage
+6. **SQLAlchemy TaskEngine** - Database-driven vulnerability analysis with targeted expressions
+7. **run_async_analyzer.py** - Command-line interface for the async analyzer
 
-## Architecture Diagram
+## Analysis Flow
+
+The enhanced async workflow follows these steps:
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                                                                 │
-│                     WorkflowOrchestrator                        │
-│                                                                 │
-│   ┌───────────┐    ┌───────────┐    ┌───────────┐               │
-│   │           │    │           │    │           │               │
-│   │ Researcher│    │ Validator │    │ Documentor│               │
-│   │           │    │           │    │           │               │
-│   └───────────┘    └───────────┘    └───────────┘               │
-│          │               │               │                      │
-└──────────┼───────────────┼───────────────┼──────────────────────┘
-           │               │               │
-           ▼               ▼               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                                                                 │
-│                        TaskManager                              │
-│                                                                 │
-│   ┌───────────┐    ┌────────────┐     ┌───────────┐             │
-│   │           │    │            │     │           │             │
-│   │ Task Queue│───▶│ Semaphore │───▶│ Worker    │             │
-│   │           │    │            │     │ Loop      │             │
-│   └───────────┘    └────────────┘     └───────────┘             │
-│                                          │                      │
-└──────────────────────────────────────────┼──────────────────────┘
-                                           │
-                                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                                                                 │
-│                      DatabaseManager                            │
-│                                                                 │
-│   ┌───────────┐    ┌───────────┐    ┌───────────┐               │
-│   │           │    │           │    │           │               │
-│   │ Project   │    │ File      │    │ Audit     │               │
-│   │           │    │           │    │           │               │
-│   └───────────┘    └───────────┘    └───────────┘               │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│             │     │             │     │             │     │             │     │             │
+│  Contract   │────▶│  Flow       │────▶│  Expression │────▶│  Primary    │────▶│  Secondary  │
+│  Parsing    │     │  Analysis   │     │  Generation │     │  Analysis   │     │  Validation │
+│             │     │             │     │             │     │             │     │             │
+└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+                                                                                       │
+                                                                                       ▼
+                                                                              ┌─────────────┐
+                                                                              │             │
+                                                                              │  Report     │
+                                                                              │  Generation │
+                                                                              │             │
+                                                                              └─────────────┘
 ```
 
-## Key Components
+1. **Contract Parsing** - Parse and structure the Solidity contracts using Tree-Sitter
+2. **Flow Analysis** - Extract detailed control flow, state changes, and path conditions
+3. **Expression Generation** - Generate test expressions based on contract structure and flow
+4. **Primary Analysis** - Perform initial analysis using LLM with flow-enhanced context
+5. **Secondary Validation** - Validate findings with secondary LLM and targeted flow examination
+6. **Report Generation** - Generate comprehensive security reports with flow context
 
-### DatabaseManager
+## Concurrency Model
 
-The `DatabaseManager` provides an asynchronous interface to the database using SQLAlchemy with asyncpg as the database driver. It handles:
+The async architecture takes advantage of Python's asyncio framework to support:
 
-- Project, file, and audit tracking
-- Persistence of analysis results
-- Query functionality for retrieving results
+1. **File-level Parallelization** - Multiple files are analyzed concurrently
+2. **Controlled Concurrency** - Configurable concurrency limits to prevent overloading
+3. **Semaphore Control** - Ensures limited concurrent access to resources
 
-### TaskManager
+Concurrency limits are defined in nodes_config and can be tuned based on available hardware:
 
-The `TaskManager` extends the `DatabaseManager` with task management capabilities:
+```python
+# Example concurrency control
+semaphore = asyncio.Semaphore(config.MAX_THREADS_OF_SCAN)
+async with semaphore:
+    # This code runs with controlled concurrency
+```
 
-- Task queuing with controlled concurrency
-- Task state management
-- Automatic retries for failed tasks
-- Task status querying
-- Dependency chaining between tasks
+## Configuration System
 
-### WorkflowOrchestrator
+The architecture integrates with the nodes_config system for flexible configuration:
 
-The `WorkflowOrchestrator` coordinates the atomic agents (Researcher, Validator, Documentor) using the task management infrastructure:
+- **Model Selection** - Configure which models to use for analysis and validation
+- **Database Settings** - Database URL and connection parameters
+- **Concurrency Settings** - Control parallel execution limits
+- **File Filtering** - Configure which files to analyze or ignore
 
-- Creates and initializes agent instances
-- Manages the workflow execution
-- Handles both synchronous and asynchronous execution models
-- Aggregates results across multiple files
+## Database Integration
 
-## Task Execution Flow
+The system uses PostgreSQL with async database access through SQLAlchemy:
 
-1. **Task Creation**: `orchestrator.run_audit_workflow()` creates tasks for each file
-2. **Task Queuing**: Tasks are added to the queue via `task_manager.add_task()`
-3. **Task Processing**: Worker loop picks up tasks and executes them within concurrency limits
-4. **Task Chaining**: Each task can spawn dependent tasks upon completion
-5. **Result Aggregation**: Results from all tasks are combined into a final report
+- **PostgreSQL** - Primary database for robustness and performance
+- **AsyncSession** - Fully async database sessions with asyncpg driver
+- **Task Tracking** - Persistent tracking of analysis tasks and progress
+- **Result Storage** - Storage of analysis results and findings
+- **Schema Compatibility** - Uses the same database schema as the synchronous version
 
-## Dependency Resolution
+## Tree-Sitter Integration
 
-Tasks are naturally ordered through explicit dependencies:
+For advanced code parsing:
 
-1. Analysis task → Validation task → Report task
-
-When a task completes, it automatically schedules the next task in the sequence.
-
-## Error Handling
-
-The system includes several error handling mechanisms:
-
-1. **Automatic retries**: Failed tasks are retried up to a configured limit
-2. **State persistence**: Task state is persisted to survive application restarts
-3. **Timeout handling**: Tasks can be configured with timeouts
-4. **Error reporting**: Detailed error information is captured and stored
-
-## Extension Points
-
-The architecture includes several extension points:
-
-1. **Custom agents**: Additional specialized agents can be added for specific analysis types
-2. **Priority queuing**: Task prioritization can be implemented
-3. **Distributed execution**: The system can be extended for multi-node execution
-4. **Real-time monitoring**: Status reporting can be enhanced with real-time updates
-5. **Tool integration**: External security tools can be integrated into the workflow
-
-## Configuration
-
-The system is configured through the `nodes_config` system, which provides a unified configuration interface from various sources (environment variables, config files, command line arguments).
-
-Key configuration values:
-
-- `MAX_THREADS_OF_SCAN`: Controls maximum concurrent tasks
-- `ASYNC_DB_URL`: Database connection string
-- `WORKFLOW_MODEL`: Default model to use for analysis
+- **AST Analysis** - Abstract Syntax Tree based code analysis
+- **Pattern Matching** - Identifying common vulnerability patterns
+- **Function Relationships** - Tracking call graphs and data flows
 
 ## Usage Examples
 
-### Basic Async Workflow
+### Basic Analysis
 
-```python
-# Initialize orchestrator
-orchestrator = WorkflowOrchestrator()
+```bash
+# Analyze a single contract
+./run_analysis.sh -f examples/SimpleVault.sol
 
-# Run async workflow
-task_ids = await orchestrator.run_audit_workflow(
-    solidity_paths=["contract.sol"],
-    query="Perform a security audit",
-    wait_for_completion=False
-)
-
-# Get task status
-for file_path, tasks in task_ids.items():
-    status = await orchestrator.task_manager.get_task_status(tasks["analysis"])
-    print(f"Status: {status['status']}")
+# Analyze a project directory
+./run_analysis.sh -d examples/defi_project
 ```
 
-### Waiting for Results
+### Advanced Options
 
-```python
-# Run async workflow and wait for completion
-report = await orchestrator.run_audit_workflow(
-    solidity_paths=["contract.sol"],
-    query="Perform a security audit",
-    wait_for_completion=True
-)
+```bash
+# Use specific models and output directory
+./run_analysis.sh -f examples/SimpleVault.sol -m llama3:70b -v claude-3-sonnet-20240229 -o custom_reports
 
-# Access results
-print(f"Findings: {len(report.findings)}")
+# Run a targeted analysis query
+./run_analysis.sh -f examples/SimpleVault.sol -q "Check for reentrancy vulnerabilities"
 ```
 
-## Future Improvements
+### Python API
 
-1. **Task Cancellation**: Ability to cancel running tasks
-2. **Progress Reporting**: Real-time progress updates
-3. **Workflow Visualization**: Visual representation of task dependencies
-4. **Task Prioritization**: Priority-based scheduling
-5. **Resource Throttling**: Dynamic adjustment of concurrency based on load
+```python
+# Basic usage
+from finite_monkey.core_async_analyzer import AsyncAnalyzer
 
-## Conclusion
+async def analyze_contract():
+    analyzer = AsyncAnalyzer()
+    results = await analyzer.analyze_contract_file("examples/SimpleVault.sol")
+    print(f"Risk assessment: {results['final_report']['risk_assessment']}")
+```
 
-The asynchronous workflow system provides a robust foundation for parallel execution of security analysis tasks. It enables efficient processing of large codebases while maintaining state and handling errors gracefully.
+## Package Management
+
+The system uses uv for efficient package management:
+
+```bash
+# Install dependencies with uv
+uv pip install tree-sitter fastapi uvicorn sqlalchemy[asyncio] asyncpg psycopg2-binary
+```
+
+## Future Extensions
+
+1. **Distributed Analysis** - Support for distributed analysis across multiple nodes
+2. **Incremental Analysis** - Only analyze changed files in successive runs
+3. **Custom Rules Engine** - Allow for user-defined analysis rules
+4. **Integration with CI/CD** - Automated analysis in continuous integration pipelines

@@ -1,11 +1,18 @@
 """
-Adapters for external services and libraries
+Adapters for integrating various components into the Finite Monkey Engine.
 """
 
-from .ollama import Ollama
+from .ollama import AsyncOllamaClient as Ollama
+from .agent_adapter import DocumentationInconsistencyAdapter
+
 # Importing Claude conditionally to avoid requiring the API key
 try:
     from .claude import Claude
-    __all__ = ["Ollama", "Claude"]
+    from .llm_factory import LLMFactory
+    __all__ = ["Ollama", "Claude", "LLMFactory", "DocumentationInconsistencyAdapter"]
 except ImportError:
-    __all__ = ["Ollama"]
+    try:
+        from .llm_factory import LLMFactory
+        __all__ = ["Ollama", "LLMFactory", "DocumentationInconsistencyAdapter"]
+    except ImportError:
+        __all__ = ["Ollama", "DocumentationInconsistencyAdapter"]

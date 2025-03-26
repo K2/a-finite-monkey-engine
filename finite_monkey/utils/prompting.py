@@ -1,8 +1,16 @@
 """
 Prompt templates and utilities for LLM interactions
+
+This module provides templates and utilities for generating prompts for LLM
+interactions. It integrates with the database-driven prompt system to allow
+dynamic prompt updates.
 """
 
-from typing import Dict, List, Any, Optional
+import asyncio
+from typing import Dict, List, Any, Optional, Union
+
+# Global variable to hold prompt service instance (initialized lazily)
+_prompt_service = None
 
 
 def get_analysis_prompt(
@@ -527,3 +535,92 @@ Focus on the most critical aspects of each business flow, particularly concernin
 access control, state transitions, and interactions with external contracts.
 """
     }
+
+
+# Dynamic prompt functions that integrate with the database
+async def get_dynamic_prompt(prompt_name: str, project_id: Optional[str] = None, **kwargs) -> str:
+    """
+    Get a dynamic prompt from the database (async version)
+    
+    Args:
+        prompt_name: Name of the prompt
+        project_id: Project ID (optional)
+        **kwargs: Parameters for the prompt
+        
+    Returns:
+        Rendered prompt string
+    """
+    global _prompt_service
+    
+    if _prompt_service is None:
+        from finite_monkey.db.prompts import prompt_service
+        _prompt_service = prompt_service
+    
+    return await _prompt_service.get_prompt(prompt_name, project_id, **kwargs)
+
+
+def get_dynamic_prompt_sync(prompt_name: str, project_id: Optional[str] = None, **kwargs) -> str:
+    """
+    Get a dynamic prompt from the database (sync version)
+    
+    Args:
+        prompt_name: Name of the prompt
+        project_id: Project ID (optional)
+        **kwargs: Parameters for the prompt
+        
+    Returns:
+        Rendered prompt string
+    """
+    # Run the async function in a new event loop
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        # No event loop in thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    return loop.run_until_complete(get_dynamic_prompt(prompt_name, project_id, **kwargs))
+
+
+async def store_prompt_result(prompt_name: str, result: str, project_id: Optional[str] = None) -> bool:
+    """
+    Store a prompt result in the database
+    
+    Args:
+        prompt_name: Name of the prompt
+        result: Result text
+        project_id: Project ID (optional)
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    global _prompt_service
+    
+    if _prompt_service is None:
+        from finite_monkey.db.prompts import prompt_service
+        _prompt_service = prompt_service
+    
+    return await _prompt_service.store_prompt_result(prompt_name, result, project_id)
+
+
+def store_prompt_result_sync(prompt_name: str, result: str, project_id: Optional[str] = None) -> bool:
+    """
+    Store a prompt result in the database (sync version)
+    
+    Args:
+        prompt_name: Name of the prompt
+        result: Result text
+        project_id: Project ID (optional)
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    # Run the async function in a new event loop
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        # No event loop in thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    return loop.run_until_complete(store_prompt_result(prompt_name, result, project_id))

@@ -203,6 +203,15 @@ class AsyncLanceDBAdapter:
             # Limit results
             lance_query = lance_query.limit(similarity_top_k)
             
+            # Safely configure additional parameters if available
+            try:
+                # Some versions of LanceDB support nprobes for better search
+                # Check both that the attribute exists AND it's not a LanceEmptyQueryBuilder
+                if hasattr(lance_query, 'nprobes') and not type(lance_query).__name__ == 'LanceEmptyQueryBuilder':
+                    lance_query = lance_query.nprobes(10)
+            except Exception as e:
+                print(f"Warning: Could not set additional search parameters: {e}")
+            
             # Execute query
             results = await asyncio.to_thread(lance_query.to_df)
             
@@ -305,7 +314,7 @@ class VectorStoreManager:
         
         # Initialize embedding model
         self.embedding_model = HuggingFaceEmbedding(
-            model_name=self.config.EMBEDDING_MODEL or "BAAI/bge-small-en-v1.5"
+            model_name=self.config.EMBEDDING_MODEL_NAME or "BAAI/bge-small-en-v1.5"
         )
         
         # Initialize LanceDB vector store
@@ -466,15 +475,26 @@ class VectorStoreManager:
             # Format results
             formatted_results = []
             for _, row in results.iterrows():
-                # Extract metadata
-                metadata = json.loads(row["metadata"])
-                
-                formatted_results.append({
-                    "id": row["id"],
-                    "text": row["text"],
-                    "metadata": metadata,
-                    "score": row["score"],
-                })
+                try:
+                    # Extract metadata
+                    metadata = json.loads(row["metadata"]) if "metadata" in row and row["metadata"] else {}
+                    
+                    result = {
+                        "id": row["id"] if "id" in row else "unknown",
+                        "text": row["text"] if "text" in row else "",
+                        "metadata": metadata,
+                    }
+                    
+                    # Handle score which might be missing in some versions of LanceDB
+                    if "score" in row:
+                        result["score"] = row["score"]
+                    else:
+                        result["score"] = 0.0  # Provide default
+                        
+                    formatted_results.append(result)
+                except Exception as e:
+                    logger.error(f"Error processing result row: {e}")
+                    continue
             
             return formatted_results
             

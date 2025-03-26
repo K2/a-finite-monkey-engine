@@ -259,8 +259,9 @@ class CounterfactualGenerator:
         Returns:
             Extracted JSON string or empty string
         """
-        # Look for JSON markers
-        json_pattern = r'(?:\[|\{)[\s\S]+?(?:\]|\})'
+        # Look for JSON markers - using a more specific pattern to match properly nested JSON
+        # The pattern looks for balanced braces/brackets
+        json_pattern = r'(\{(?:[^{}]|(?:\{(?:[^{}]|(?:\{[^{}]*\}))*\}))*\}|\[(?:[^\[\]]|(?:\[(?:[^\[\]]|(?:\[[^\[\]]*\]))*\]))*\])'
         json_match = re.search(json_pattern, text, re.DOTALL)
         
         if json_match:
@@ -291,5 +292,29 @@ class CounterfactualGenerator:
         except:
             pass
             
-        # If all else fails, return empty string
+        # If all else fails, try to extract any JSON-like structure as a last resort
+        try:
+            # Attempt to find outer-most brackets
+            first_open_brace = text.find('{')
+            first_open_bracket = text.find('[')
+            
+            # Determine which comes first (if any)
+            if first_open_brace != -1 and (first_open_bracket == -1 or first_open_brace < first_open_bracket):
+                # Object starts first
+                last_close_brace = text.rfind('}')
+                if last_close_brace > first_open_brace:
+                    json_str = text[first_open_brace:last_close_brace+1]
+                    json.loads(json_str)  # Test if valid
+                    return json_str
+            elif first_open_bracket != -1:
+                # Array starts first
+                last_close_bracket = text.rfind(']')
+                if last_close_bracket > first_open_bracket:
+                    json_str = text[first_open_bracket:last_close_bracket+1]
+                    json.loads(json_str)  # Test if valid
+                    return json_str
+        except:
+            pass
+            
+        # If absolutely everything fails, return empty string
         return ""
