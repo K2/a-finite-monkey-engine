@@ -1,0 +1,18 @@
+2025-03-24 07:02:24.264 | INFO     | __main__:<module>:30 - Successfully imported parsers
+2025-03-24 07:02:24.264 | INFO     | __main__:test_direct_chunking_flow:229 - Starting direct chunking test
+2025-03-24 07:02:24.264 | INFO     | __main__:load_file_directly:85 - Loading file directly: /home/files/git/a-finite-monkey-engine/tests/fixtures/sample_contract.sol
+2025-03-24 07:02:24.264 | INFO     | __main__:load_file_directly:103 - Loaded file: sample_contract.sol (656 bytes)
+2025-03-24 07:02:24.264 | INFO     | __main__:parse_with_tree_sitter:114 - Parsing /home/files/git/a-finite-monkey-engine/tests/fixtures/sample_contract.sol with TreeSitterGraph
+2025-03-24 07:02:24.265 | INFO     | __main__:parse_with_tree_sitter:123 - Successfully parsed /home/files/git/a-finite-monkey-engine/tests/fixtures/sample_contract.sol with TreeSitterGraph
+2025-03-24 07:02:24.265 | INFO     | __main__:test_direct_chunking_flow:247 - Successfully generated AST with tree-sitter
+2025-03-24 07:02:24.265 | INFO     | __main__:parse_with_sgp:138 - Parsing /home/files/git/a-finite-monkey-engine/tests/fixtures/sample_contract.sol with AsyncSolidityParser
+2025-03-24 07:02:24.316 | INFO     | __main__:parse_with_sgp:147 - Successfully parsed /home/files/git/a-finite-monkey-engine/tests/fixtures/sample_contract.sol with AsyncSolidityParser
+2025-03-24 07:02:24.317 | INFO     | __main__:parse_with_sgp:183 - SGP parser found 1 contracts, 3 functions, 1 events, and 1 errors
+2025-03-24 07:02:24.317 | INFO     | __main__:test_direct_chunking_flow:252 - Successfully parsed with AsyncSolidityParser
+2025-03-24 07:02:24.331 | INFO     | __main__:test_direct_chunking_flow:260 - SGP Parser Result Summary:
+2025-03-24 07:02:24.340 | INFO     | __main__:test_direct_chunking_flow:261 - {
+  "file": "unknown",
+  "contracts": []
+}
+2025-03-24 07:02:24.340 | INFO     | __main__:test_direct_chunking_flow:268 - ✅ Direct chunking test PASSED
+2025-03-24 07:02:24.340 | INFO     | __main__:main:341 - ✅ All tests PASSED

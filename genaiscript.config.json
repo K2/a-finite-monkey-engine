@@ -1,0 +1,10 @@
+{
+  "modelAliases": {
+    "large": "openai:gpt-4o",
+    "small": "openai:gpt-4o-mini",
+    "vision": "openai:gpt-4o",
+    "reasoning": "openai:gpt-4o"
+  },
+  "systemSafety": "default",
+  "fenceFormat": "xml"
+}

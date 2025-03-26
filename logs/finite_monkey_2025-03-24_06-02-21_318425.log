@@ -1,0 +1,6 @@
+2025-03-24 06:02:33.712 | INFO     | __main__:test_call_graph_parse:185 - Testing AsyncCallGraph parse() method
+2025-03-24 06:02:36.788 | INFO     | __main__:test_call_graph_parse:198 - Using base_dir: /home/files/git/a-finite-monkey-engine
+2025-03-24 06:02:36.789 | INFO     | __main__:test_call_graph_parse:199 - Using src_dir: examples/src
+2025-03-24 06:02:36.789 | INFO     | finite_monkey.utils.async_call_graph:create:67 - whitelist.json not found, will analyze all functions
+2025-03-24 06:02:36.790 | INFO     | finite_monkey.utils.async_call_graph:create:75 - modifier_whitelist.json not found, will analyze all modifiers
+2025-03-24 06:02:36.817 | INFO     | finite_monkey.utils.parsestring:<module>:39 - Successfully loaded SGP Solidity parser

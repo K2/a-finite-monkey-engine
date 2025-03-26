@@ -1,0 +1,2 @@
+2025-03-24 03:27:43.152 | ERROR    | __main__:test_sgp_parser:148 - Failed to import SGP parser: No module named 'finite_monkey.sgp'
+2025-03-24 03:27:43.152 | ERROR    | __main__:<module>:161 - ❌ SGP parser test FAILED

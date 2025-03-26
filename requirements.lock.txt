@@ -1,0 +1,18 @@
+# Core dependencies
+psycopg2-binary==2.9.9
+pgvector==0.2.3
+numpy==1.26.2
+pydantic==2.5.2
+fastapi==0.104.1
+
+# Embedding providers - choose one!
+
+# Option 1: sentence-transformers (recommended for stability)
+sentence-transformers==2.2.2
+
+# Option 2: langchain (if needed)
+# langchain==0.0.335  # Last version before breaking changes
+# langchain-community==0.0.10  # If using newer versions
+
+# Option 3: llama-index (if needed)
+# llama-index==0.9.14

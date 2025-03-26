@@ -1,0 +1,4 @@
+2025-03-24 03:44:34.131 | INFO     | __main__:<module>:31 - Successfully imported parsers
+2025-03-24 03:44:34.132 | INFO     | __main__:test_direct_chunking_flow:166 - Starting direct chunking test
+2025-03-24 03:44:34.132 | INFO     | __main__:load_file_directly:87 - Loading file directly: /home/files/git/a-finite-monkey-engine/tests/fixtures/sample_contract.sol
+2025-03-24 03:44:34.132 | INFO     | __main__:load_file_directly:105 - Loaded file: sample_contract.sol (656 bytes)

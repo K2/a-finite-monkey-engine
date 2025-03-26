@@ -1,0 +1,13 @@
+2025-03-24 05:31:47.273 | INFO     | __main__:test_call_graph_parse:185 - Testing AsyncCallGraph parse() method
+2025-03-24 05:31:47.274 | INFO     | __main__:test_call_graph_parse:204 - Using base_dir: /home/files/git/a-finite-monkey-engine
+2025-03-24 05:31:47.274 | INFO     | __main__:test_call_graph_parse:205 - Using src_dir: tests/fixtures/call_graph
+2025-03-24 05:31:47.274 | INFO     | finite_monkey.utils.async_call_graph:parse:638 - Parsing project at /home/files/git/a-finite-monkey-engine/tests/fixtures/call_graph
+2025-03-24 05:31:47.274 | INFO     | finite_monkey.utils.async_call_graph:create:67 - whitelist.json not found, will analyze all functions
+2025-03-24 05:31:47.274 | INFO     | finite_monkey.utils.async_call_graph:create:75 - modifier_whitelist.json not found, will analyze all modifiers
+2025-03-24 05:31:47.274 | INFO     | finite_monkey.utils.async_call_graph:create:94 - External parser path not configured, using internal analysis only
+2025-03-24 05:31:47.275 | INFO     | finite_monkey.utils.async_call_graph:parse:648 - Collected 0 functions
+2025-03-24 05:31:47.275 | INFO     | finite_monkey.utils.async_call_graph:parse:680 - Built 0 call trees
+2025-03-24 05:31:47.275 | INFO     | __main__:test_call_graph_parse:218 - Call graph parsing completed
+2025-03-24 05:31:47.275 | INFO     | __main__:test_call_graph_parse:224 - Call graph successfully created
+2025-03-24 05:31:47.275 | ERROR    | __main__:test_call_graph_parse:228 - Functions not extracted
+2025-03-24 05:31:47.275 | ERROR    | __main__:main:327 - ❌ AsyncCallGraph test FAILED

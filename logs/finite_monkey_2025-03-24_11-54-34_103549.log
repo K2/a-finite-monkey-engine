@@ -1,0 +1,4 @@
+2025-03-24 11:54:38.131 | INFO     | finite_monkey.config.llm_setup:setup_default_llm:25 - Default LLM already configured, skipping setup
+2025-03-24 11:54:38.131 | INFO     | finite_monkey.pipeline.factory:__init__:71 - LLM adapter initialized successfully
+2025-03-24 11:54:38.131 | INFO     | finite_monkey.adapters.validator_adapter:_initialize_validator:61 - Initialized validator with model: dolphin3:8b-llama3.1-q8_0
+2025-03-24 11:54:38.131 | INFO     | finite_monkey.pipeline.factory:__init__:78 - Validator adapter initialized successfully

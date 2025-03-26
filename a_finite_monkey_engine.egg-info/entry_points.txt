@@ -1,0 +1,3 @@
+[console_scripts]
+finite-monkey = finite_monkey.__main__:run_main
+finite-monkey-web = finite_monkey.web.app:run_server

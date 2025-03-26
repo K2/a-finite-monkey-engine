@@ -1,0 +1,13 @@
+2025-03-24 04:10:21.525 | INFO     | __main__:test_sgp_parser:131 - Parsing /home/files/git/a-finite-monkey-engine/tests/fixtures/test_inheritance.sol
+2025-03-24 04:10:21.794 | INFO     | __main__:test_sgp_parser:139 - Successfully parsed with AsyncSolidityParser
+2025-03-24 04:10:54.677 | INFO     | __main__:test_sgp_parser:181 - Found 3 contracts: IOwnable, Base, Child
+2025-03-24 04:11:03.378 | INFO     | __main__:test_sgp_parser:185 - Found 1 interfaces
+2025-03-24 04:11:03.379 | INFO     | __main__:test_sgp_parser:198 - Contract 'IOwnable' has 0 functions
+2025-03-24 04:11:03.379 | INFO     | __main__:test_sgp_parser:202 - Contract 'IOwnable' has 0 state variables
+2025-03-24 04:11:03.380 | INFO     | __main__:test_sgp_parser:198 - Contract 'Base' has 0 functions
+2025-03-24 04:11:03.381 | INFO     | __main__:test_sgp_parser:202 - Contract 'Base' has 0 state variables
+2025-03-24 04:11:03.381 | INFO     | __main__:test_sgp_parser:194 - Contract 'Child' inherits from: unnamed, unnamed
+2025-03-24 04:11:03.381 | INFO     | __main__:test_sgp_parser:198 - Contract 'Child' has 0 functions
+2025-03-24 04:11:03.382 | INFO     | __main__:test_sgp_parser:202 - Contract 'Child' has 0 state variables
+2025-03-24 04:11:03.383 | INFO     | __main__:test_sgp_parser:209 - Child contract has 0 modifiers
+2025-03-24 04:11:03.383 | INFO     | __main__:main:237 - ✅ AsyncSolidityParser test PASSED

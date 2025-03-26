@@ -1,0 +1,63 @@
+{
+  "project_id": "project_fa338837",
+  "state": {
+    "project_id": "project_fa338837",
+    "created_at": "2025-03-16T16:49:29.269082",
+    "current_time": "2025-03-16T16:49:29.269091",
+    "pipeline_stages": []
+  },
+  "metrics": {
+    "processed_items": 0,
+    "total_findings": 0,
+    "error_count": 6,
+    "stage_timings": {},
+    "start_time": 1742158169.2690966
+  },
+  "findings": [],
+  "errors": [
+    {
+      "stage": "stage_0",
+      "message": "Stage returned None instead of context",
+      "timestamp": "2025-03-16T16:49:29.270264",
+      "exception": null,
+      "id": "error_2e11aab7"
+    },
+    {
+      "stage": "vulnerability_scan",
+      "message": "Failed to scan for vulnerabilities",
+      "timestamp": "2025-03-16T16:50:14.551654",
+      "exception": "LlamaIndexAdapter.__init__() got an unexpected keyword argument 'model_params'",
+      "id": "error_70786568"
+    },
+    {
+      "stage": "cognitive_bias_analysis",
+      "message": "Failed to analyze cognitive biases",
+      "timestamp": "2025-03-16T16:50:14.552033",
+      "exception": "LlamaIndexAdapter.__init__() got an unexpected keyword argument 'model_params'",
+      "id": "error_aa6b88ee"
+    },
+    {
+      "stage": "documentation_inconsistency_analysis",
+      "message": "Failed to analyze documentation inconsistencies",
+      "timestamp": "2025-03-16T16:55:20.858625",
+      "exception": "'DocumentationAnalyzer' object has no attribute 'process'",
+      "id": "error_691858d7"
+    },
+    {
+      "stage": "counterfactual_analysis",
+      "message": "No LLM adapter available for counterfactual analysis",
+      "timestamp": "2025-03-16T16:55:20.860397",
+      "exception": null,
+      "id": "error_2d9075bc"
+    },
+    {
+      "stage": "pipeline_stage_12",
+      "message": "Pipeline stage error: object Context can't be used in 'await' expression",
+      "timestamp": "2025-03-16T16:55:20.861486",
+      "exception": "object Context can't be used in 'await' expression",
+      "id": "error_a38ab462"
+    }
+  ],
+  "file_count": 108,
+  "config": {}
+}

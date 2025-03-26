@@ -1,0 +1,20 @@
+2025-03-24 03:16:02.572 | INFO     | __main__:test_direct_chunking_flow:128 - Starting direct chunking test
+2025-03-24 03:16:02.572 | INFO     | __main__:load_file_directly:85 - Loading file directly: /home/files/git/a-finite-monkey-engine/tests/fixtures/sample_contract.sol
+2025-03-24 03:16:02.572 | INFO     | __main__:load_file_directly:103 - Loaded file: sample_contract.sol (656 bytes)
+2025-03-24 03:16:02.573 | INFO     | __main__:parse_with_sitter:109 - Parsing /home/files/git/a-finite-monkey-engine/tests/fixtures/sample_contract.sol with SoliditySitter
+2025-03-24 03:16:02.573 | ERROR    | __main__:parse_with_sitter:121 - Error parsing with TreeSitterGraph: 'TreeSitterGraph' object has no attribute 'parse_code'
+2025-03-24 03:16:02.574 | ERROR    | __main__:parse_with_sitter:123 - Traceback (most recent call last):
+  File "/home/files/git/a-finite-monkey-engine/./scripts/direct_loader_chunker_test.py", line 116, in parse_with_sitter
+    ast = await sitter.parse_code(content, file_path)
+                ^^^^^^^^^^^^^^^^^
+AttributeError: 'TreeSitterGraph' object has no attribute 'parse_code'. Did you mean: 'parse_sol'?
+
+2025-03-24 03:16:02.630 | INFO     | finite_monkey.utils.chunking.async_chunker:chunk_code:300 - Found 3 functions, 1 contracts, 1 events, and 0 errors in sample_contract.sol
+2025-03-24 03:16:02.631 | INFO     | __main__:test_direct_chunking_flow:158 - Generated 2 chunks
+2025-03-24 03:16:02.631 | INFO     | __main__:test_direct_chunking_flow:169 - Found 1 chunks of type 'contract'
+2025-03-24 03:16:02.631 | INFO     | __main__:test_direct_chunking_flow:169 - Found 1 chunks of type 'function'
+2025-03-24 03:16:02.632 | INFO     | finite_monkey.utils.chunking.processors:transform_chunks_to_context:137 - Context update: Added 1 contracts and 1 functions
+2025-03-24 03:16:02.632 | INFO     | __main__:test_direct_chunking_flow:184 - Context before: {'contracts': 0, 'functions': 0}
+2025-03-24 03:16:02.632 | INFO     | __main__:test_direct_chunking_flow:185 - Context after: {'contracts': 1, 'functions': 1}
+2025-03-24 03:16:02.632 | INFO     | __main__:test_direct_chunking_flow:191 - ✅ Direct chunking test PASSED
+2025-03-24 03:16:02.632 | INFO     | __main__:main:208 - ✅ All tests PASSED

@@ -1,2 +1,4 @@
 .vscode/launch.json
 uv.lock
+**/lancedb/**
+*/node_modules/*

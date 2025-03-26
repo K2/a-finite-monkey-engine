@@ -1,0 +1,35 @@
+# Core dependencies - let uv handle version resolution
+llama-index
+llama-index-core
+llama-index-llms-anthropic
+llama-index-llms-openai
+llama-index-llms-ollama
+pydantic
+loguru
+aiofiles
+python-dotenv
+asyncio
+
+# Data processing
+numpy
+pandas
+scipy
+
+# Document processing
+pypdf
+python-docx
+markdown
+beautifulsoup4
+
+# Natural language processing
+regex
+langchain
+transformers
+
+# Code analysis
+tree-sitter
+
+# Visualization
+matplotlib
+networkx
+plotly

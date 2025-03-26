@@ -1,0 +1,1 @@
+2025-03-21 22:37:29.969 | ERROR    | finite_monkey.utils.logger:_safe_log:58 - Error importing components: No module named 'finite_monkey.analyzers.function_extractor'

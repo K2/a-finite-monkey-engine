@@ -1,0 +1,578 @@
+
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Smart Contract Analysis Visualization</title>
+            <script src="https://unpkg.com/cytoscape/dist/cytoscape.min.js"></script>
+            <script src="https://unpkg.com/popper.js"></script>
+            <script src="https://unpkg.com/tippy.js@4.3.0/umd/index.all.min.js"></script>
+            <script src="https://unpkg.com/cytoscape-popper"></script>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
+                #cy { width: 100%; height: 800px; }
+                .controls { padding: 10px; background-color: #f5f5f5; border-bottom: 1px solid #ddd; }
+                button { margin: 5px; padding: 5px 10px; }
+                
+                /* Filter controls */
+                .filters { padding: 10px; background-color: #f9f9f9; }
+                .filter-group { display: inline-block; margin-right: 15px; vertical-align: top; }
+                .filter-title { font-weight: bold; margin-bottom: 5px; }
+                
+                /* Tooltip styles */
+                .tippy-tooltip {
+                    font-size: 12px;
+                    padding: 8px;
+                    background-color: #333;
+                }
+                .tooltip-table {
+                    border-collapse: collapse;
+                    width: 100%;
+                }
+                .tooltip-table td {
+                    padding: 3px;
+                    vertical-align: top;
+                }
+                .tooltip-table td:first-child {
+                    font-weight: bold;
+                    width: 30%;
+                    text-align: right;
+                }
+                
+                /* Edge annotation style */
+                .edge-label {
+                    text-align: center;
+                    background-color: rgba(255, 255, 255, 0.8);
+                    border-radius: 3px;
+                    padding: 2px 4px;
+                    font-size: 10px;
+                }
+                
+                /* Legend styles */
+                .legend {
+                    position: absolute;
+                    bottom: 10px;
+                    right: 10px;
+                    background-color: rgba(255, 255, 255, 0.9);
+                    border: 1px solid #ddd;
+                    padding: 10px;
+                    border-radius: 4px;
+                }
+                .legend-item {
+                    display: flex;
+                    align-items: center;
+                    margin-bottom: 5px;
+                }
+                .legend-color {
+                    width: 15px;
+                    height: 15px;
+                    margin-right: 5px;
+                    display: inline-block;
+                }
+                .legend-shape {
+                    width: 15px;
+                    height: 15px;
+                    margin-right: 5px;
+                    display: inline-block;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="controls">
+                <button id="fit">Fit View</button>
+                <button id="grid">Grid Layout</button>
+                <button id="cose">Force-Directed Layout</button>
+                <button id="circle">Circle Layout</button>
+                <button id="breadthfirst">Tree Layout</button>
+                <span>Zoom: </span>
+                <button id="zoom-in">+</button>
+                <button id="zoom-out">-</button>
+                <button id="toggle-legend">Toggle Legend</button>
+            </div>
+            
+            <div class="filters">
+                <div class="filter-group">
+                    <div class="filter-title">Show/Hide Elements:</div>
+                    <div><input type="checkbox" id="show-contracts" checked> Contracts</div>
+                    <div><input type="checkbox" id="show-functions" checked> Functions</div>
+                    <div><input type="checkbox" id="show-variables" checked> Variables</div>
+                    <div><input type="checkbox" id="show-events" checked> Events</div>
+                </div>
+                
+                <div class="filter-group">
+                    <div class="filter-title">Relationship Types:</div>
+                    <div><input type="checkbox" id="show-calls" checked> Function Calls</div>
+                    <div><input type="checkbox" id="show-inherits" checked> Inheritance</div>
+                    <div><input type="checkbox" id="show-uses" checked> Variable Usage</div>
+                    <div><input type="checkbox" id="show-emits" checked> Event Emissions</div>
+                </div>
+                
+                <div class="filter-group">
+                    <div class="filter-title">Function Visibility:</div>
+                    <div><input type="checkbox" id="show-public" checked> Public</div>
+                    <div><input type="checkbox" id="show-external" checked> External</div>
+                    <div><input type="checkbox" id="show-internal" checked> Internal</div>
+                    <div><input type="checkbox" id="show-private" checked> Private</div>
+                </div>
+            </div>
+            
+            <div id="cy"></div>
+            
+            <div class="legend" id="legend">
+                <h4 style="margin-top: 0;">Legend</h4>
+                <div class="legend-item">
+                    <div class="legend-shape" style="background-color: #4b5320; border-radius: 0;"></div>
+                    <span>Contract</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-shape" style="background-color: #11479e; border-radius: 4px;"></div>
+                    <span>Function</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-shape" style="background-color: #9932cc; border-radius: 50%;"></div>
+                    <span>Variable</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-shape" style="background-color: #dc582a; transform: rotate(45deg);"></div>
+                    <span>Event</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #33a8ff;"></div>
+                    <span>Function Calls</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #ff5733;"></div>
+                    <span>Inheritance</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #33ff57;"></div>
+                    <span>Variable Usage</span>
+                </div>
+            </div>
+            
+            <script>
+                // Graph data
+                var graphData = {"elements": {"nodes": [{"data": {"id": "for", "label": "for", "type": "contract", "file": "Vault.sol"}}, {"data": {"id": "Vault", "label": "Vault", "type": "contract", "file": "Vault.sol"}}], "edges": []}};
+                
+                // Initialize Cytoscape
+                var cy = cytoscape({
+                    container: document.getElementById('cy'),
+                    elements: graphData.elements,
+                    style: [
+                        // Node styles
+                        {
+                            selector: 'node',
+                            style: {
+                                'label': 'data(label)',
+                                'text-valign': 'center',
+                                'color': '#fff',
+                                'background-color': '#11479e',
+                                'text-outline-width': 2,
+                                'text-outline-color': '#11479e'
+                            }
+                        },
+                        // Contract nodes
+                        {
+                            selector: 'node[type="contract"]',
+                            style: {
+                                'background-color': '#4b5320',
+                                'text-outline-color': '#4b5320',
+                                'shape': 'rectangle',
+                                'width': '120px',
+                                'height': '60px',
+                                'font-weight': 'bold'
+                            }
+                        },
+                        // Function nodes
+                        {
+                            selector: 'node[type="function"]',
+                            style: {
+                                'background-color': '#11479e',
+                                'text-outline-color': '#11479e',
+                                'shape': 'round-rectangle',
+                                'width': '100px',
+                                'height': '40px'
+                            }
+                        },
+                        // Variable nodes
+                        {
+                            selector: 'node[type="variable"]',
+                            style: {
+                                'background-color': '#9932cc',
+                                'text-outline-color': '#9932cc',
+                                'shape': 'ellipse',
+                                'width': '80px',
+                                'height': '40px'
+                            }
+                        },
+                        // Event nodes
+                        {
+                            selector: 'node[type="event"]',
+                            style: {
+                                'background-color': '#dc582a',
+                                'text-outline-color': '#dc582a',
+                                'shape': 'diamond',
+                                'width': '80px',
+                                'height': '40px'
+                            }
+                        },
+                        // Edge styles
+                        {
+                            selector: 'edge',
+                            style: {
+                                'width': 2,
+                                'curve-style': 'bezier',
+                                'line-color': '#9dbaea',
+                                'target-arrow-color': '#9dbaea',
+                                'target-arrow-shape': 'triangle',
+                                'arrow-scale': 1.5
+                            }
+                        },
+                        // Edge with labels
+                        {
+                            selector: 'edge[label]',
+                            style: {
+                                'label': 'data(label)',
+                                'text-rotation': 'autorotate',
+                                'text-margin-y': -10,
+                                'font-size': '10px'
+                            }
+                        },
+                        // Inheritance edges
+                        {
+                            selector: 'edge[type="inherits"]',
+                            style: {
+                                'line-color': '#ff5733',
+                                'target-arrow-color': '#ff5733',
+                                'line-style': 'dashed'
+                            }
+                        },
+                        // Function call edges
+                        {
+                            selector: 'edge[type="calls"]',
+                            style: {
+                                'line-color': '#33a8ff',
+                                'target-arrow-color': '#33a8ff'
+                            }
+                        },
+                        // Uses edges
+                        {
+                            selector: 'edge[type="uses"]',
+                            style: {
+                                'line-color': '#33ff57',
+                                'target-arrow-color': '#33ff57',
+                                'target-arrow-shape': 'diamond'
+                            }
+                        },
+                        // Contains edges
+                        {
+                            selector: 'edge[type="contains"]',
+                            style: {
+                                'line-color': '#cccccc',
+                                'width': 1,
+                                'line-style': 'dotted',
+                                'target-arrow-shape': 'none'
+                            }
+                        },
+                        // Emits edges
+                        {
+                            selector: 'edge[type="emits"]',
+                            style: {
+                                'line-color': '#ff9900',
+                                'target-arrow-color': '#ff9900',
+                                'target-arrow-shape': 'circle'
+                            }
+                        },
+                        // Has edges
+                        {
+                            selector: 'edge[type="has"]',
+                            style: {
+                                'line-color': '#dddddd',
+                                'width': 1,
+                                'line-style': 'dashed',
+                                'target-arrow-shape': 'none'
+                            }
+                        }
+                    ],
+                    layout: {
+                        name: 'cose',
+                        idealEdgeLength: 150,
+                        nodeOverlap: 20,
+                        padding: 30
+                    }
+                });
+                
+                // Initialize tooltips
+                cy.ready(function() {
+                    // Make popper accessible outside callback
+                    let popper = {};
+
+                    // Create tooltip function
+                    let makeTippy = function(node, text) {
+                        let ref = node.popperRef();
+                        let dummyDomEle = document.createElement('div');
+                        
+                        let tip = tippy(dummyDomEle, {
+                            content: function() {
+                                let content = document.createElement('div');
+                                content.innerHTML = text;
+                                return content;
+                            },
+                            trigger: 'manual',
+                            arrow: true,
+                            placement: 'bottom',
+                            hideOnClick: false,
+                            interactive: true,
+                            multiple: true,
+                            sticky: true
+                        });
+                        
+                        node.on('mouseover', () => tip.show());
+                        node.on('mouseout', () => tip.hide());
+                        
+                        return tip;
+                    };
+                    
+                    // Process all nodes
+                    cy.nodes().forEach(function(node) {
+                        let tooltipHTML = '';
+                        let nodeData = node.data();
+                        
+                        // Create HTML for tooltip based on node type
+                        if (nodeData.type === 'contract') {
+                            tooltipHTML = '<table class="tooltip-table">' +
+                                '<tr><td>Type:</td><td>Contract</td></tr>' +
+                                '<tr><td>Name:</td><td>' + nodeData.label + '</td></tr>';
+                            
+                            if (nodeData.file) {
+                                tooltipHTML += '<tr><td>File:</td><td>' + nodeData.file + '</td></tr>';
+                            }
+                            
+                            tooltipHTML += '</table>';
+                        } 
+                        else if (nodeData.type === 'function') {
+                            tooltipHTML = '<table class="tooltip-table">' +
+                                '<tr><td>Type:</td><td>Function</td></tr>' +
+                                '<tr><td>Name:</td><td>' + nodeData.label + '</td></tr>';
+                            
+                            if (nodeData.contract) {
+                                tooltipHTML += '<tr><td>Contract:</td><td>' + nodeData.contract + '</td></tr>';
+                            }
+                            
+                            // Include additional properties if available
+                            if (nodeData.visibility) {
+                                tooltipHTML += '<tr><td>Visibility:</td><td>' + nodeData.visibility + '</td></tr>';
+                            }
+                            
+                            if (nodeData.params) {
+                                tooltipHTML += '<tr><td>Parameters:</td><td>' + nodeData.params + '</td></tr>';
+                            }
+                            
+                            if (nodeData.returns) {
+                                tooltipHTML += '<tr><td>Returns:</td><td>' + nodeData.returns + '</td></tr>';
+                            }
+                            
+                            if (nodeData.modifiers) {
+                                tooltipHTML += '<tr><td>Modifiers:</td><td>' + nodeData.modifiers + '</td></tr>';
+                            }
+                            
+                            // Include view/pure/payable flags
+                            let flags = [];
+                            if (nodeData.view) flags.push('view');
+                            if (nodeData.pure) flags.push('pure');
+                            if (nodeData.payable) flags.push('payable');
+                            
+                            if (flags.length > 0) {
+                                tooltipHTML += '<tr><td>Flags:</td><td>' + flags.join(', ') + '</td></tr>';
+                            }
+                            
+                            tooltipHTML += '</table>';
+                        }
+                        else if (nodeData.type === 'variable') {
+                            tooltipHTML = '<table class="tooltip-table">' +
+                                '<tr><td>Type:</td><td>State Variable</td></tr>' +
+                                '<tr><td>Name:</td><td>' + nodeData.label + '</td></tr>';
+                            
+                            if (nodeData.contract) {
+                                tooltipHTML += '<tr><td>Contract:</td><td>' + nodeData.contract + '</td></tr>';
+                            }
+                            
+                            if (nodeData.type) {
+                                tooltipHTML += '<tr><td>Data Type:</td><td>' + nodeData.type + '</td></tr>';
+                            }
+                            
+                            tooltipHTML += '</table>';
+                        }
+                        else if (nodeData.type === 'event') {
+                            tooltipHTML = '<table class="tooltip-table">' +
+                                '<tr><td>Type:</td><td>Event</td></tr>' +
+                                '<tr><td>Name:</td><td>' + nodeData.label + '</td></tr>';
+                            
+                            if (nodeData.contract) {
+                                tooltipHTML += '<tr><td>Contract:</td><td>' + nodeData.contract + '</td></tr>';
+                            }
+                            
+                            if (nodeData.params) {
+                                tooltipHTML += '<tr><td>Parameters:</td><td>' + nodeData.params + '</td></tr>';
+                            }
+                            
+                            tooltipHTML += '</table>';
+                        }
+                        
+                        // Create the tooltip
+                        makeTippy(node, tooltipHTML);
+                    });
+                });
+                
+                // Control buttons
+                document.getElementById('fit').addEventListener('click', function() {
+                    cy.fit();
+                });
+                
+                document.getElementById('grid').addEventListener('click', function() {
+                    cy.layout({ name: 'grid' }).run();
+                });
+                
+                document.getElementById('cose').addEventListener('click', function() {
+                    cy.layout({ 
+                        name: 'cose',
+                        idealEdgeLength: 150,
+                        nodeOverlap: 20,
+                        padding: 30
+                    }).run();
+                });
+                
+                document.getElementById('circle').addEventListener('click', function() {
+                    cy.layout({ name: 'circle' }).run();
+                });
+                
+                document.getElementById('breadthfirst').addEventListener('click', function() {
+                    cy.layout({ 
+                        name: 'breadthfirst',
+                        directed: true,
+                        padding: 30
+                    }).run();
+                });
+                
+                document.getElementById('zoom-in').addEventListener('click', function() {
+                    cy.zoom({
+                        level: cy.zoom() * 1.2,
+                        renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+                    });
+                });
+                
+                document.getElementById('zoom-out').addEventListener('click', function() {
+                    cy.zoom({
+                        level: cy.zoom() * 0.8,
+                        renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+                    });
+                });
+                
+                // Toggle legend
+                document.getElementById('toggle-legend').addEventListener('click', function() {
+                    var legend = document.getElementById('legend');
+                    if (legend.style.display === 'none') {
+                        legend.style.display = 'block';
+                    } else {
+                        legend.style.display = 'none';
+                    }
+                });
+                
+                // Filter checkboxes
+                document.getElementById('show-contracts').addEventListener('change', function() {
+                    if (this.checked) {
+                        cy.nodes('[type="contract"]').show();
+                    } else {
+                        cy.nodes('[type="contract"]').hide();
+                    }
+                });
+                
+                document.getElementById('show-functions').addEventListener('change', function() {
+                    if (this.checked) {
+                        cy.nodes('[type="function"]').show();
+                    } else {
+                        cy.nodes('[type="function"]').hide();
+                    }
+                });
+                
+                document.getElementById('show-variables').addEventListener('change', function() {
+                    if (this.checked) {
+                        cy.nodes('[type="variable"]').show();
+                    } else {
+                        cy.nodes('[type="variable"]').hide();
+                    }
+                });
+                
+                document.getElementById('show-events').addEventListener('change', function() {
+                    if (this.checked) {
+                        cy.nodes('[type="event"]').show();
+                    } else {
+                        cy.nodes('[type="event"]').hide();
+                    }
+                });
+                
+                document.getElementById('show-calls').addEventListener('change', function() {
+                    if (this.checked) {
+                        cy.edges('[type="calls"]').show();
+                    } else {
+                        cy.edges('[type="calls"]').hide();
+                    }
+                });
+                
+                document.getElementById('show-inherits').addEventListener('change', function() {
+                    if (this.checked) {
+                        cy.edges('[type="inherits"]').show();
+                    } else {
+                        cy.edges('[type="inherits"]').hide();
+                    }
+                });
+                
+                document.getElementById('show-uses').addEventListener('change', function() {
+                    if (this.checked) {
+                        cy.edges('[type="uses"]').show();
+                    } else {
+                        cy.edges('[type="uses"]').hide();
+                    }
+                });
+                
+                document.getElementById('show-emits').addEventListener('change', function() {
+                    if (this.checked) {
+                        cy.edges('[type="emits"]').show();
+                    } else {
+                        cy.edges('[type="emits"]').hide();
+                    }
+                });
+                
+                // Function visibility filters
+                document.getElementById('show-public').addEventListener('change', function() {
+                    filterFunctionsByVisibility('public', this.checked);
+                });
+                
+                document.getElementById('show-external').addEventListener('change', function() {
+                    filterFunctionsByVisibility('external', this.checked);
+                });
+                
+                document.getElementById('show-internal').addEventListener('change', function() {
+                    filterFunctionsByVisibility('internal', this.checked);
+                });
+                
+                document.getElementById('show-private').addEventListener('change', function() {
+                    filterFunctionsByVisibility('private', this.checked);
+                });
+                
+                function filterFunctionsByVisibility(visibility, show) {
+                    const functionNodes = cy.nodes().filter(function(element) {
+                        return element.data('type') === 'function' && 
+                               (element.data('visibility') === visibility || element.data('visibility') === undefined);
+                    });
+                    
+                    if (show) {
+                        functionNodes.show();
+                    } else {
+                        functionNodes.hide();
+                    }
+                }
+            </script>
+        </body>
+        </html>
+        

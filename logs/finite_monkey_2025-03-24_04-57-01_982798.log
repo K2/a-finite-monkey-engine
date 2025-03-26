@@ -1,0 +1,16 @@
+2025-03-24 04:57:06.030 | INFO     | __main__:test_call_graph_parse:185 - Testing AsyncCallGraph parse() method
+2025-03-24 04:57:06.031 | INFO     | __main__:test_call_graph_parse:204 - Using base_dir: /home/files/git/a-finite-monkey-engine
+2025-03-24 04:57:06.031 | INFO     | __main__:test_call_graph_parse:205 - Using src_dir: tests/fixtures/call_graph
+2025-03-24 04:57:06.031 | INFO     | finite_monkey.utils.async_call_graph:create:67 - whitelist.json not found, will analyze all functions
+2025-03-24 04:57:06.031 | INFO     | finite_monkey.utils.async_call_graph:create:75 - modifier_whitelist.json not found, will analyze all modifiers
+2025-03-24 04:57:06.031 | INFO     | finite_monkey.utils.async_call_graph:create:94 - External parser path not configured, using internal analysis only
+2025-03-24 04:57:06.032 | ERROR    | __main__:test_call_graph_parse:278 - Error testing call graph: object async_generator can't be used in 'await' expression
+2025-03-24 04:57:06.032 | ERROR    | __main__:test_call_graph_parse:280 - Traceback (most recent call last):
+  File "/home/files/git/a-finite-monkey-engine/./scripts/test_call_graph.py", line 211, in test_call_graph_parse
+    await call_graph.parse()
+  File "/home/files/git/a-finite-monkey-engine/finite_monkey/utils/async_call_graph.py", line 604, in parse
+    self.functions = await self.cg.functions_iterator()
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: object async_generator can't be used in 'await' expression
+
+2025-03-24 04:57:06.032 | ERROR    | __main__:main:327 - ❌ AsyncCallGraph test FAILED

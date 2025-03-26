@@ -1,0 +1,19 @@
+[python]
+# Use the latest compatible Python version
+python-version = "3.10"
+
+[pypi]
+# Use the official PyPI index
+index-url = "https://pypi.org/simple"
+
+[project]
+# Enable project mode for better dependency management
+package-mode = true
+
+[venv]
+# Create virtual environments in the project directory
+venvs-dir = ".venv"
+
+[commands]
+# Enable additional commands like uv pip
+enable-pip = true
