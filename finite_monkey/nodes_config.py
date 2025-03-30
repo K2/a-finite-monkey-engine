@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     COUNTERFACTUAL_MODEL:str="dolphin3:8b-llama3.1-q8_0"
     VALIDATOR_MODEL:str = "dolphin3:8b-llama3.1-q8_0"
     BUSINESS_FLOW_MODEL:str ="dolphin3:8b-llama3.1-q8_0"
-
+    ANALYSIS_MODEL:str="dolphin3:8b-llama3.1-q8_0"
 
     LANCEDB_URI: str = "lancedb_"
     BUSINESS_FLOW_MODEL_BASE_URL:str = "http://localhost:11434"
@@ -48,11 +48,14 @@ class Settings(BaseSettings):
     DOCUMENTATION_MODEL_PROVIDER:str="ollama"
     COUNTERFACTUAL_MODEL_PROVIDER:str="ollama"
     VALIDATOR_MODEL_PROVIDER:str="ollama"
+    ANALYSIS_MODEL_PROVIDER:str="ollama"
+
 
     VALIDATOR_MODEL_BASE_URL:str="http://127.0.0.1:11434/"
     COGNITIVE_BIAS_MODEL_BASE_URL:str="http://127.0.0.1:11434/"
     DOCUMENTATION_MODEL_BASE_URL:str="http://127.0.0.1:11434/"
     COUNTERFACTUAL_MODEL_BASE_URL:str="http://127.0.0.1:11434/"
+    ANALYSIS_MODEL_BASE_URL:str="http://127.0.0.1:11434/"
     # Add DEFAULT_MODEL for backward compatibility
     DEFAULT_PROVIDER:str = "ollama"
     DEFAULT_BASE_URL:str = "http://127.0.0.1:11434/"
@@ -194,6 +197,10 @@ class Settings(BaseSettings):
             dotenv_settings,
             PyprojectTomlConfigSettingsSource(settings_cls),
         )
+
+# LLM response parameters
+MAX_TOKENS = 1024  # Maximum number of tokens to generate
+TEMPERATURE = 0.1  # Temperature for generation (lower = more deterministic)
 
 # Global settings instance
 config = Box(Settings(), frozen_box=False)

@@ -27,7 +27,7 @@ import asyncio
 from finite_monkey.utils.async_call_graph import AsyncCallGraph, AProjectAudit
 from finite_monkey.nodes_config import config
 
-from box import Box
+from box import Box, BoxList
 
 import os
 import re
@@ -122,7 +122,7 @@ class AsyncContractChunker:
             }]
         
         
-        @staticmethod
+    @staticmethod
     async def parse(
         input_string: str,
     ) -> SourceUnit:
@@ -266,7 +266,7 @@ class AsyncContractChunker:
         code: str,
         name: str = "Contract",
         file_path: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """
         Chunk a Solidity code string into semantic segments
         Args:
@@ -274,14 +274,13 @@ class AsyncContractChunker:
             name: Name for the code (file name or contract name)
             file_path: Optional path to the source file
         Returns:
-            List of chunks with metadata
+            Dictionary containing file info, contracts and their functions
         """
         try:
             # Parse the code into an AST
             results = await self.parse(code)
             absolute_path = os.path.abspath(file_path) if file_path else None
             all_results = []
-            chunks = []
             
             # Define a recursive function to process all nodes
             def process_node(node, parent_contract=None):
@@ -354,112 +353,109 @@ class AsyncContractChunker:
             contracts = [result for result in all_results if getattr(result, 'type', None) == 'ContractDefinition']
             imports = [result for result in all_results if getattr(result, 'type', None) == 'ImportDirective']
             
-            # Default chunks list - ensure we always return something valid
-            if not contracts and not functions:
-                # Create a single chunk for the entire file if no contracts/functions found
-                chunks.append({
-                    "chunk_id": f"{name}_full",
-                    "content": code,
-                    "start_char": 0,
-                    "end_char": len(code),
-                    "source_file": file_path,
-                    "chunk_type": "file",  # Mark as file type
-                    "name": name,
-                    "imports": []
-                })
+            # Create the standardized output dictionary
+            output = Box({
+                "chunk_id": f"{name}_full",
+                "content": code,
+                "start_char": 0,
+                "end_char": len(code),
+                "source_file": file_path,
+                "chunk_type": "file",
+                "name": name,
+                "contracts": []
+            })
             
-            # Create chunks for contracts
+            # Process contracts
             for contract in contracts:
-                node = Box(contract)
-                node.chunk_id = f"{name}_{contract.name}"
-                node.content = code[contract.range.offset_start:contract.range.offset_end]
-                node.start_char = contract.range.offset_start
-                node.end_char = contract.range.offset_end
-                node.source_file = file_path
-                node.chunk_type = "contract"
-                node.contract_name = contract.name
-                node.imports = [getattr(imp, 'path', '') for imp in imports]
-                chunks.append(node)
-            
-            # Create chunks for functions with proper error handling
-            for func in functions:
-                try:
-                    func_name = getattr(func, 'name', 'UnnamedFunction')
-                    contract_name = getattr(func, 'contract_name', 'UnknownContract')
-                    
-                    # Get function source if available through multiple methods
-                    func_text = None
-                    
-                    # Method 1: Use pre-extracted source if we stored it during node processing
-                    if hasattr(func, 'source'):
-                        func_text = func.source
-                    
-                    # Method 2: Try to get source from 'src' attribute (line:pos:length format)
-                    elif hasattr(func, 'body') and func.body:
-                        func_text= code[func.body.range.offset_start:func.body.range.offset_end]
-                        
-                    # Method 3: Try to get actual range from utility function
-                    elif hasattr(func, 'type') and func.type == 'FunctionDefinition':
-                        range_info = self._find_function_range(code, func_name)
-                        if range_info:
-                            start_pos, end_pos = range_info
-                            func_text = code[start_pos:end_pos]
-                    
-                    # If we still don't have source, use a placeholder
-                    if not func_text:
-                        func_text = f"// Unable to extract source for function {func_name}"
-                        logger.warning(f"Unable to extract source for function {func_name} in {contract_name}")
-                    else:
-                        node = Box(func)
-                        node.chunk_id = f"{name}_{contract_name}_{func_name}"
-                        node.content = func_text
-                        node.start_char = 0
-                        node.end_char = len(func_text)
-                        node.source_file = file_path
-                        node.chunk_type = "function"
-                        node.contract_name = contract_name
-                        node.function_name = func_name
-                        node.imports = [getattr(imp, 'path', '') for imp in imports]
-                        chunks.append(node)
-                        
-                except Exception as e:
-                    # Log the error but continue processing other functions
-                    logger.error(f"Error creating chunk for function: {e}")
+                if hasattr(contract, 'kind') and contract.kind == 'interface':
                     continue
+                    
+                contract_node = Box({
+                    "chunk_id": f"{name}_{contract.name}",
+                    "content": code[contract.range.offset_start:contract.range.offset_end] if hasattr(contract, 'range') else "",
+                    "start_char": contract.range.offset_start if hasattr(contract, 'range') else 0,
+                    "end_char": contract.range.offset_end if hasattr(contract, 'range') else 0,
+                    "source_file": file_path,
+                    "chunk_type": "contract",
+                    "name": contract.name,
+                    "contract_name": contract.name,
+                    "functions": BoxList(),
+                    "imports": [getattr(imp, 'path', '') for imp in imports]
+                })
+                
+                # Process functions for this contract
+                for func in functions:
+                    func_contract_name = getattr(func, 'contract_name', '')
+                    if func_contract_name != contract.name:
+                        continue
+                        
+                    try:
+                        func_name = getattr(func, 'name', 'UnnamedFunction')
+                        
+                        # Get function source
+                        func_text = None
+                        
+                        # Method 1: Use pre-extracted source 
+                        if hasattr(func, 'source'):
+                            func_text = func.source
+                        
+                        # Method 2: Get source from range
+                        elif hasattr(func, 'range'):
+                            func_text = code[func.range.offset_start:func.range.offset_end]
+                            
+                        # Method 3: Use regex fallback
+                        elif not func_text and hasattr(func, 'type') and func.type == 'FunctionDefinition':
+                            range_info = self._find_function_range(code, func_name)
+                            if range_info:
+                                start_pos, end_pos = range_info
+                                func_text = code[start_pos:end_pos]
+                        
+                        # Handle constructor
+                        if getattr(func, 'is_constructor', False):
+                            func_name = "constructor"
+                        
+                        # Use placeholder if we couldn't get the source
+                        if not func_text:
+                            func_text = f"// Unable to extract source for function {func_name}"
+                        
+                        # Create function node
+                        func_node = Box({
+                            "chunk_id": f"{name}_{contract.name}_{func_name}",
+                            "content": func_text,
+                            "start_char": 0,
+                            "end_char": len(func_text),
+                            "source_file": file_path,
+                            "chunk_type": "function",
+                            "name": func_name,
+                            "contract_name": contract.name,
+                            "function_name": func_name,
+                            "full_name": f"{contract.name}.{func_name}",
+                            "imports": contract_node.imports
+                        })
+                        
+                        contract_node.functions.append(func_node)
+                        
+                    except Exception as e:
+                        logger.error(f"Error creating chunk for function {getattr(func, 'name', 'Unknown')}: {e}")
+                        continue
+                        
+                output.contracts.append(contract_node)
             
-            return chunks
+            return output
             
         except Exception as e:
             logger.error(f"Exception in chunk_code: {e}")
-            # Return a minimal valid result even on error
-            return [{
+            # Return a minimal valid result dictionary on error
+            return {
                 "chunk_id": f"{name}_error",
                 "content": "// Error processing code",
                 "start_char": 0,
                 "end_char": 0,
                 "source_file": file_path,
-                "chunk_type": "error",  # Mark as error type
-                "error": str(e)
-            }]
-
-    def _find_function_range(self, code: str, function_name: str) -> Optional[Tuple[int, int]]:
-        """
-        Find the range of a function in the source code using regex
-        
-        Args:
-            code: The full source code
-            function_name: Name of the function to find
-            
-        Returns:
-            Tuple of (start, end) positions or None if not found
-        """
-        # Pattern to match function definition with the specific name
-        pattern = rf'function\s+{re.escape(function_name)}\s*\([^)]*\)(?:\s*(?:public|private|internal|external))?(?:\s*(?:view|pure|payable))?\s*(?:returns\s*\([^)]*\))?\s*\{{[^{{]*(?:\{{[^{{]*\}}[^{{]*)*\}}'
-        
-        match = re.search(pattern, code, re.DOTALL)
-        if match:
-            return match.span()
-        return None
+                "chunk_type": "error",
+                "error": str(e),
+                "contracts": []
+            }
 
     
     async def chunk_project(self, project_path: str) -> Dict[str, List[Dict[str, Any]]]:

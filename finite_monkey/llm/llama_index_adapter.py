@@ -37,11 +37,21 @@ class LlamaIndexAdapter:
     This adapter provides a unified interface for working with different LLM providers.
     """
     
-    def __init__(self, model_name: str = None, provider: str = "ollama", base_url: str = None, **kwargs):
+    def __init__(
+        self,
+        model_name: str = None,
+        provider: str = None,
+        base_url: Optional[str] = None,
+        request_timeout: Optional[int] = 60,  # Changed from 'timeout' to 'request_timeout'
+        temperature: float = 0.1,
+        additional_kwargs: Optional[Dict[str, Any]] = None
+    ):
+        """Initialize the LlamaIndex adapter with model settings"""
         self._model_name = model_name
         self._provider = provider
         self._base_url = base_url
-        self._kwargs = kwargs
+        self.request_timeout = request_timeout  # Make sure to use consistent naming
+        self._kwargs = additional_kwargs or {}
         self._llm = None
         
         # Try to initialize LLM at creation time
@@ -80,6 +90,7 @@ class LlamaIndexAdapter:
                 self._llm = Ollama(
                     model=self._model_name,
                     base_url=self._base_url,
+                    request_timeout=self.request_timeout,  # Use the consistent parameter name
                     **self._kwargs
                 )
                 logger.debug(f"Initialized Ollama LLM with model {self._model_name}")
@@ -88,6 +99,7 @@ class LlamaIndexAdapter:
                 from llama_index.llms.openai import OpenAI
                 self._llm = OpenAI(
                     model=self._model_name,
+                    request_timeout=self.request_timeout,  # Use the consistent parameter name
                     **self._kwargs
                 )
                 logger.debug(f"Initialized OpenAI LLM with model {self._model_name}")

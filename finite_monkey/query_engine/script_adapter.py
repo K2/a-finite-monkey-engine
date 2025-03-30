@@ -13,7 +13,7 @@ from loguru import logger
 from finite_monkey.pipeline.core import Context
 from .base_engine import QueryResult
 from .flare_engine import FlareQueryEngine
-
+from finite_monkey.pipeline.core import Pipeline
 
 class ScriptGenerationRequest(BaseModel):
     """Request parameters for script generation"""
@@ -424,7 +424,7 @@ DEFAULT_QUERIES = [
 ]
 
 
-async def setup_pipeline(input_path: str, factory: PipelineFactory) -> Dict[str, Any]:
+async def setup_pipeline(input_path: str, factory) -> Dict[str, Any]:
     """
     Set up the analysis pipeline and run document loading stages.
     

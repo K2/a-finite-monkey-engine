@@ -7,8 +7,14 @@ import guidance
 import logging
 from typing import Dict, List, Any, Optional, Union, Callable, Type, TypeVar, Generic
 from pathlib import Path
+import ollama
 from pydantic import BaseModel
 import json
+import inspect
+
+# Import nodes_config for configuration values
+from finite_monkey.nodes_config import config
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -16,24 +22,69 @@ logger = logging.getLogger(__name__)
 # Type variable for generic structured output
 T = TypeVar('T', bound=BaseModel)
 
+# Define GuidancePydanticProgram here to avoid circular import
+class GuidancePydanticProgram:
+    """
+    Pydantic-enabled guidance program for structured output.
+    """
+    
+    def __init__(self, llm, system_prompt=None):
+        """Initialize with LLM and optional system prompt"""
+        self.llm = llm
+        self.messages = []
+        if system_prompt:
+            self.system(system_prompt)
+    
+    def system(self, content):
+        """Add a system message"""
+        self.messages.append({"role": "system", "content": content})
+        return self
+    
+    def user(self, content):
+        """Add a user message"""
+        self.messages.append({"role": "user", "content": content})
+        return self
+    
+    def assistant(self, content):
+        """Add an assistant message"""
+        self.messages.append({"role": "assistant", "content": content})
+        return self
+    
+    async def agenerate(self, variables=None):
+        """Generate response asynchronously"""
+        variables = variables or {}
+        # Use the LLM to generate a response
+        try:
+            if hasattr(self.llm, "achat") and inspect.iscoroutinefunction(self.llm.achat):
+                response = await self.llm.achat(messages=self.messages)
+                return {"response": response.message.content, "messages": self.messages}
+            else:
+                # Fallback to non-async method if needed
+                logger.warning("Using non-async chat method - consider using async version")
+                if hasattr(self.llm, "chat") and callable(self.llm.chat):
+                    response = self.llm.chat(messages=self.messages)
+                    return {"response": response.message.content, "messages": self.messages}
+                else:
+                    raise ValueError("LLM does not support chat methods")
+        except Exception as e:
+            logger.error(f"Error generating response: {e}")
+            return {"error": str(e), "messages": self.messages}
+
 class GuidanceManager:
     """
     Core manager class for guidance integration with A Finite Monkey Engine.
     Handles model loading, program creation, and execution.
     """
     
-    def __init__(self, model_config: Optional[Dict[str, Any]] = None):
+    def __init__(self):
         """
-        Initialize the GuidanceManager with optional model configuration.
-        
-        Args:
-            model_config: Configuration dictionary for the model
+        Initialize the GuidanceManager using configuration from nodes_config.
         """
-        self.model_config = model_config or {}
-        self.default_model = self.model_config.get("default_model", "openai:gpt-4o")
+        self.default_model = getattr(config, "DEFAULT_MODEL", "gpt-4o")
+        self.default_provider = getattr(config, "DEFAULT_PROVIDER", "openai").lower()
         self.llm_cache = {}
         
-    def get_llm(self, model_identifier: str) -> guidance.llm:
+    def get_llm(self, model_identifier: str) -> guidance.models:
         """
         Get or create an LLM instance based on the model identifier.
         Uses caching to avoid redundant model loading.
@@ -48,29 +99,73 @@ class GuidanceManager:
             return self.llm_cache[model_identifier]
             
         try:
-            provider, model_name = model_identifier.split(':', 1)
+            if ":" in model_identifier:
+                provider, model_name = model_identifier.split(':', 1)
+            else:
+                # If provider not specified, use default provider
+                provider = self.default_provider
+                model_name = model_identifier
         except ValueError:
             logger.warning(f"Invalid model identifier format: {model_identifier}. Using default.")
-            provider, model_name = self.default_model.split(':', 1)
+            provider = self.default_provider
+            model_name = self.default_model
         
         # Load the appropriate LLM based on provider
         try:
+            # Get parameters from nodes_config
+            temperature = getattr(config, "TEMPERATURE", 0.1)
+            request_timeout = getattr(config, "REQUEST_TIMEOUT", 60)
+            max_tokens = getattr(config, "MAX_TOKENS", 1024)
+            
             if provider.lower() == "openai":
-                llm = guidance.llms.OpenAI(model_name, **self.model_config.get("openai", {}))
+                # Get OpenAI-specific config from nodes_config
+                api_key = getattr(config, "OPENAI_API_KEY", None)
+                openai_params = {
+                    "temperature": temperature,
+                    "request_timeout": request_timeout,
+                    "max_tokens": max_tokens
+                }
+                if api_key:
+                    openai_params["api_key"] = api_key
+                
+                llm = guidance.llms.OpenAI(model_name, **openai_params)
+            
             elif provider.lower() == "anthropic":
-                llm = guidance.llms.Anthropic(model_name, **self.model_config.get("anthropic", {}))
+                # Get Anthropic-specific config
+                api_key = getattr(config, "ANTHROPIC_API_KEY", None)
+                anthropic_params = {
+                    "temperature": temperature,
+                    "max_tokens": max_tokens
+                }
+                if api_key:
+                    anthropic_params["api_key"] = api_key
+                
+                llm = guidance.llms.Anthropic(model_name, **anthropic_params)
+            
             elif provider.lower() == "ollama":
-                # Add json_mode=True for Ollama models
-                ollama_config = self.model_config.get("ollama", {}).copy()
-                ollama_config["json_mode"] = True
+                # Get Ollama-specific config
+                base_url = getattr(config, "OLLAMA_BASE_URL", "http://localhost:11434")
+                ollama_params = {
+                    "temperature": temperature,
+                    "base_url": base_url,
+                    "json_mode": True
+                }
+                
                 logger.info(f"Creating Ollama LLM with json_mode=True: {model_name}")
-                llm = guidance.llms.Ollama(model_name, **ollama_config)
+                llm = guidance.llms.Ollama(model_name, **ollama_params)
+            
             elif provider.lower() == "transformers":
-                llm = guidance.llms.Transformers(model_name, **self.model_config.get("transformers", {}))
+                # Get Transformers-specific config
+                device = getattr(config, "TRANSFORMERS_DEVICE", "cuda" if getattr(config, "USE_GPU", False) else "cpu")
+                transformers_params = {
+                    "device": device
+                }
+                
+                llm = guidance.llms.Transformers(model_name, **transformers_params)
+            
             else:
                 logger.warning(f"Unsupported provider: {provider}. Using default.")
-                provider, model_name = self.default_model.split(':', 1)
-                return self.get_llm(self.default_model)
+                return self.get_llm(f"{self.default_provider}:{self.default_model}")
                 
             # Cache the LLM instance
             self.llm_cache[model_identifier] = llm
@@ -80,9 +175,9 @@ class GuidanceManager:
             logger.error(f"Error loading model: {e}")
             raise
     
-    def create_program(self, 
+    def create_program(self,        
                        model_identifier: Optional[str] = None, 
-                       system_prompt: Optional[str] = None) -> guidance.Program:
+                       system_prompt: Optional[str] = None) -> GuidancePydanticProgram:
         """
         Create a guidance program with the specified model and system prompt.
         
@@ -91,14 +186,15 @@ class GuidanceManager:
             system_prompt: Optional system prompt to initialize the program
             
         Returns:
-            A guidance Program instance
+            A GuidancePydanticProgram instance
         """
-        model_id = model_identifier or self.default_model
+        model_id = model_identifier or f"{self.default_provider}:{self.default_model}"
         llm = self.get_llm(model_id)
         
-        program = guidance.Program(llm)
-        if system_prompt:
-            program = program.system(system_prompt)
+        program = GuidancePydanticProgram(
+            llm=llm,
+            system_prompt=system_prompt
+        )
             
         return program
     
@@ -130,7 +226,7 @@ class GuidanceManager:
         
         try:
             # Get the LLM instance
-            model_id = model_identifier or self.default_model
+            model_id = model_identifier or f"{self.default_provider}:{self.default_model}"
             llm = self.get_llm(model_id)
             
             # Use as_structured_llm for structured output

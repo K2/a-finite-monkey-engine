@@ -1,2 +1,0 @@
-2025-03-24 03:03:06.657 | INFO     | __main__:test_loader_chunker_flow:30 - Starting loader-chunker interaction test
-2025-03-24 03:03:06.658 | INFO     | finite_monkey.utils.project_loader:load_project:58 - Found 108 Solidity files in examples/src

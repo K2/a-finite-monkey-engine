@@ -3,6 +3,9 @@ from typing import Optional, Dict, Any
 import httpx
 import logging
 
+from loguru import logger
+from finite_monkey.nodes_config import config
+
 class AsyncOllamaClient:
     """Client for the Ollama API."""
     
@@ -13,10 +16,6 @@ class AsyncOllamaClient:
         timeout: Optional[float] = None,
         max_retries: Optional[int] = None,
     ):
-        # Get config for defaults
-        from ..nodes_config import nodes_config
-        config = nodes_config()
-        
         # Make sure model is never empty
         if not model or model.strip() == '':
             model = config.DEFAULT_MODEL
@@ -27,43 +26,76 @@ class AsyncOllamaClient:
         self.timeout = timeout if timeout is not None else config.REQUEST_TIMEOUT
         self.max_retries = max_retries if max_retries is not None else config.MAX_RETRIES
         
-    async def acomplete(self, prompt: str, **kwargs) -> str:
+        # Initialize the HTTP client session with explicit timeout
+        timeout_obj = httpx.Timeout(timeout or config.REQUEST_TIMEOUT)
+        self.session = httpx.AsyncClient(timeout=timeout_obj)
+        logger.debug(f"Initialized AsyncOllamaClient with model: {self.model}")
+    
+    async def aclose(self):
+        """Properly close the async HTTP client"""
+        if hasattr(self, 'session') and self.session:
+            await self.session.aclose()
+            logger.debug("Closed AsyncOllamaClient session")
+
+    def __del__(self):
+        """Standard destructor - cannot be async but will try to clean up"""
+        if hasattr(self, 'session') and self.session:
+            import asyncio
+            try:
+                # Try to get an event loop and run the close task
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(self.session.aclose())
+                else:
+                    # If no loop is running, we can't do much here
+                    pass
+            except Exception:
+                # Just pass if we can't access the event loop
+                pass
+        
+    async def acomplete(self, prompt: str) -> Dict[str, Any]:
         """
-        Send an asynchronous completion request to Ollama.
+        Asynchronously complete a prompt using Ollama.
         
         Args:
             prompt: The prompt to complete
-            **kwargs: Additional parameters to pass to the API
             
         Returns:
-            The generated completion text
+            The completion response
         """
-        # Verify model is not empty before sending request
-        if not self.model or self.model.strip() == '':
-            from ..nodes_config import nodes_config
-            self.model = nodes_config().DEFAULT_MODEL
-            logging.warning(f"Empty model detected during request, using default: {self.model}")
-            
         url = f"{self.base_url}/api/generate"
         
-        # Set up default parameters
-        params = {
+        data = {
             "model": self.model,
             "prompt": prompt,
-            **kwargs
+            "stream": False  # Explicitly disable streaming to ensure proper JSON response
         }
         
-        # Set up client with appropriate timeout
-        async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout)) as client:
-            for attempt in range(self.max_retries):
-                try:
-                    response = await client.post(url, json=params)
-                    response.raise_for_status()
-                    result = response.json()
-                    return result.get("response", "")
-                except (httpx.RequestError, httpx.HTTPStatusError) as e:
-                    if attempt == self.max_retries - 1:
-                        # Last attempt failed
-                        raise e
-                    # Wait before retrying (exponential backoff)
-                    await asyncio.sleep(2 ** attempt)
+        try:
+            # Don't use async with since some httpx versions might not support it properly
+            response = await self.session.post(url, json=data)
+            
+            if response.status_code != 200:
+                error_text = await response.aread()
+                error_text = error_text.decode('utf-8') if isinstance(error_text, bytes) else str(error_text)
+                logger.error(f"Ollama API error: {response.status_code} - {error_text}")
+                return {"error": error_text}
+                
+            # Parse the response with explicit error handling
+            try:
+                result = response.json()
+                return {
+                    "text": result.get("response", ""),
+                    "model": self.model,
+                    "usage": {
+                        "prompt_tokens": result.get("prompt_eval_count", 0),
+                        "completion_tokens": result.get("eval_count", 0),
+                        "total_tokens": result.get("prompt_eval_count", 0) + result.get("eval_count", 0)
+                    }
+                }
+            except Exception as e:
+                logger.error(f"Failed to parse Ollama response: {e}")
+                return {"error": f"Failed to parse response: {str(e)}"}
+        except Exception as e:
+            logger.error(f"Error calling Ollama API: {e}")
+            return {"error": str(e)}

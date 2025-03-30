@@ -24,6 +24,20 @@ from .logging import PipelineLogger
 
 from .transformers import AgentState, agent_workflow, WorkflowContext
 
+# Add at the top with other imports
+from enum import Enum, auto
+
+class PipelineStageState(Enum):
+    """
+    Enum representing the current processing stage of a contract
+    """
+    INIT = auto()              # Initial state
+    FILES_LOADED = auto()      # Raw files loaded
+    CONTRACTS_EXTRACTED = auto() # Contract code extracted from files
+    FUNCTIONS_EXTRACTED = auto() # Functions extracted from contracts
+    ANALYSIS_COMPLETE = auto() # Analysis completed
+    ERROR = auto()             # Processing error
+
 # Type definitions
 T = TypeVar('T')
 StageFunc = Callable[["Context", Any], "Context"]
@@ -41,7 +55,8 @@ class Context:
     def __init__(
         self, 
         project_id: Optional[str] = None, 
-        config: Optional[Dict[str, Any]] = None
+        config: Optional[Dict[str, Any]] = None,
+        input_path: Optional[str] = None
     ):
         """
         Initialize a pipeline context
@@ -49,9 +64,13 @@ class Context:
         Args:
             project_id: Unique identifier for the project
             config: Configuration dictionary
+            input_path: Path to the input files
         """
         # Generate ID if not provided
         self.project_id = project_id or f"project_{uuid.uuid4().hex[:8]}"
+        
+        # Store input path
+        self.input_path = input_path
         
         # Initialize empty containers
         self.state: Dict[str, Any] = {
@@ -59,10 +78,23 @@ class Context:
             "created_at": datetime.now().isoformat(),
             "current_time": datetime.now().isoformat(),
             "pipeline_stages": [],
+            "current_stage": PipelineStageState.INIT.name,
         }
+        
+        # Processing hierarchy: files -> contracts -> functions
         self.files: Dict[str, Dict[str, Any]] = {}
-        self.chunks: Dict[str, Dict[str, Any]] = {}  # Add chunks dictionary
-        self.functions: Dict[str, Dict[str, Any]] = {}  # Add functions dictionary
+        self.contracts: Dict[str, Dict[str, Any]] = {}  # Renamed from chunks
+        self.functions: Dict[str, Dict[str, Any]] = {}  # Functions extracted from contracts
+        
+        # Metadata for processing information
+        self.meta: Dict[str, Any] = {
+            "input_path": input_path,
+            "file_count": 0,
+            "contract_count": 0,
+            "function_count": 0,
+            "processing_stats": {}
+        }
+        
         self.metrics: Dict[str, Any] = {
             "processed_items": 0,
             "total_findings": 0,
@@ -192,15 +224,94 @@ class Context:
                 "name": file_data["name"],
                 "size": file_data["size"],
                 "extension": file_data["extension"],
-                "is_solidity": file_data["is_solidity"],
-                "has_chunks": "chunks" in file_data,
-                "chunk_count": len(file_data["chunks"]) if "chunks" in file_data else 0,
+                "is_solidity": file_data.get("is_solidity", False),
+                "has_contracts": any(c.get("file_id") == file_id for c in self.contracts.values()),
             }
             for file_id, file_data in self.files.items()
         }
         
+        # Include contract metadata (previously chunks)
+        context_dict["contracts"] = {
+            contract_id: {
+                "id": contract_data["id"],
+                "name": contract_data.get("name", "Unknown"),
+                "file_id": contract_data.get("file_id", "Unknown"),
+                "size": len(contract_data.get("content", "")),
+                "has_functions": any(fn.get("contract_id") == contract_id for fn in self.functions.values()),
+            }
+            for contract_id, contract_data in self.contracts.items()
+        }
+        
+        # Include function metadata
+        context_dict["functions"] = {
+            function_id: {
+                "id": function_data["id"],
+                "name": function_data.get("name", "Unknown"),
+                "contract_id": function_data.get("contract_id", "Unknown"),
+                "visibility": function_data.get("visibility", "Unknown"),
+                "is_constructor": function_data.get("is_constructor", False),
+                "line_count": function_data.get("line_count", 0),
+            }
+            for function_id, function_data in self.functions.items()
+        }
+        
         return json.dumps(context_dict, indent=indent)
+    
+    def update_stage(self, stage: PipelineStageState) -> None:
+        """
+        Update the current pipeline stage state
+        
+        Args:
+            stage: New pipeline stage state
+        """
+        prev_stage = self.state.get("current_stage", PipelineStageState.INIT.name)
+        self.state["current_stage"] = stage.name
+        self.state["stage_transition"] = {
+            "from": prev_stage,
+            "to": stage.name,
+            "timestamp": datetime.now().isoformat()
+        }
+        logger.info(f"Pipeline stage transition: {prev_stage} -> {stage.name}")
 
+    def set_files_loaded(self) -> None:
+        """Mark files as loaded and update metadata"""
+        self.update_stage(PipelineStageState.FILES_LOADED)
+        self.meta["file_count"] = len(self.files)
+        self.meta["processing_stats"]["files_loaded_at"] = datetime.now().isoformat()
+
+    def set_contracts_extracted(self) -> None:
+        """Mark contracts as extracted and update metadata"""
+        self.update_stage(PipelineStageState.CONTRACTS_EXTRACTED)
+        self.meta["contract_count"] = len(self.contracts)
+        self.meta["processing_stats"]["contracts_extracted_at"] = datetime.now().isoformat()
+
+    def set_functions_extracted(self) -> None:
+        """Mark functions as extracted and update metadata"""
+        self.update_stage(PipelineStageState.FUNCTIONS_EXTRACTED)
+        self.meta["function_count"] = len(self.functions)
+        self.meta["processing_stats"]["functions_extracted_at"] = datetime.now().isoformat()
+
+    def add_contract(self, contract_id: str, contract_data: Dict[str, Any]) -> None:
+        """
+        Add a contract to the context
+        
+        Args:
+            contract_id: Unique contract identifier
+            contract_data: Contract data dictionary
+        """
+        self.contracts[contract_id] = contract_data
+        logger.debug(f"Added contract: {contract_id}")
+        
+    def add_function(self, function_id: str, function_data: Dict[str, Any]) -> None:
+        """
+        Add a function to the context
+        
+        Args:
+            function_id: Unique function identifier
+            function_data: Function data dictionary
+        """
+        self.functions[function_id] = function_data
+        logger.debug(f"Added function: {function_id}")
 
 class Stage(Generic[T]):
     """

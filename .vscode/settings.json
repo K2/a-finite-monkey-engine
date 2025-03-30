@@ -15,5 +15,10 @@
     "codegraphy.selectedNodeColor": "#fff",
     "codegraphy.favoriteNodeColor": "#ffd700",
     "codegraphy.outlineColor": "#ffd700",
-    "terminal.integrated.tabs.defaultColor": "terminal.ansiCyan"
+    "terminal.integrated.tabs.defaultColor": "terminal.ansiCyan",
+    "python.testing.pytestArgs": [
+        "tests"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
 }

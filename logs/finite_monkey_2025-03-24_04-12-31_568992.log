@@ -1,3 +1,0 @@
-2025-03-24 04:12:43.903 | INFO     | __main__:test_sgp_parser:131 - Parsing /home/files/git/a-finite-monkey-engine/tests/fixtures/test_inheritance.sol
-2025-03-24 04:12:44.253 | INFO     | __main__:test_sgp_parser:139 - Successfully parsed with AsyncSolidityParser
-2025-03-24 04:12:58.045 | INFO     | __main__:test_sgp_parser:181 - Found 3 contracts: IOwnable, Base, Child

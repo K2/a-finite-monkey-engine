@@ -15,6 +15,7 @@ from llama_index.core.settings import Settings
 from ..pipeline.core import Context
 from ..models.documentation import DocumentationQuality
 from ..nodes_config import config
+from ..utils.llm_method_resolver import call_llm_async, extract_content_from_response
 
 class DocumentationAnalyzer:
     """
@@ -120,7 +121,7 @@ class DocumentationAnalyzer:
             natspec = self._extract_natspec(content)
             
             # Evaluate documentation quality using LLM
-            quality_assessment = await self._assess_quality(content, metrics, natspec)
+            quality_assessment = await self._assess_quality(content, file_data.get("type", "solidity"))
             
             # Create documentation quality result
             quality = DocumentationQuality(
@@ -255,118 +256,114 @@ class DocumentationAnalyzer:
         
         return natspec
     
-    async def _assess_quality(self, content: str, metrics: Dict[str, Any], natspec: Dict[str, Any]) -> Dict[str, Any]:
+    async def _assess_quality(self, content: str, file_type: str) -> Dict[str, Any]:
         """
-        Assess documentation quality using LLM
+        Assess the quality of documentation in the given content.
         
         Args:
-            content: Contract source code
-            metrics: Documentation metrics
-            natspec: Extracted NatSpec documentation
+            content: Content to analyze
+            file_type: Type of file being analyzed
             
         Returns:
             Dictionary with quality assessment
         """
-        # Default assessment
-        assessment = {
-            "overall_score": 0,
-            "completeness": 0,
-            "clarity": 0,
-            "accuracy": 0,
-            "recommendations": []
-        }
-        
-        # Skip if no LLM is available
-        llm = None
-        if self.llm_adapter and hasattr(self.llm_adapter, 'llm'):
-            llm = self.llm_adapter.llm
-        else:
-            llm = Settings.llm
-        
-        if not llm:
-            logger.warning("No LLM available for documentation quality assessment")
-            return assessment
-        
-        # Create a prompt for the LLM
-        prompt = f"""
-        You are a smart contract documentation expert. Evaluate the quality of documentation in this Solidity contract:
-
-        Documentation Metrics:
-        - Lines of code: {metrics['code_lines']}
-        - Lines of comments: {metrics['comment_lines']}
-        - Documentation ratio: {metrics['documentation_ratio']:.2f}
-        - Functions: {metrics['function_count']}
-        - Documented functions: {metrics['documented_functions']}
-        - Function documentation ratio: {metrics['function_documentation_ratio']:.2f}
-
-        NatSpec Documentation Present:
-        - Contract title: {"Yes" if natspec['contract']['title'] else "No"}
-        - Contract author: {"Yes" if natspec['contract']['author'] else "No"}
-        - Contract notice: {"Yes" if natspec['contract']['notice'] else "No"}
-        - Contract dev notes: {"Yes" if natspec['contract']['dev'] else "No"}
-        - Documented functions: {len(natspec['functions'])}
-
-        First 500 characters of contract:
-        ```solidity
-        {content[:500]}
-        ```
-
-        Evaluate the documentation quality based on:
-        1. Completeness: Are all important functions and state variables documented?
-        2. Clarity: Is the documentation clear and understandable?
-        3. Accuracy: Does the documentation match the code?
-        4. NatSpec compliance: Does it follow NatSpec format properly?
-
-        Format your response as valid JSON:
-        ```json
-        {{
-          "overall_score": 7.5,
-          "completeness": 8,
-          "clarity": 7,
-          "accuracy": 8,
-          "natspec_compliance": 7,
-          "strengths": ["Good function documentation", "Clear parameter descriptions"],
-          "weaknesses": ["Missing return value documentation", "No contract-level documentation"],
-          "recommendations": [
-            "Add @return tags to document return values",
-            "Add contract-level @title and @notice tags"
-          ]
-        }}
-        ```
-
-        Scores should be on a scale from 0 to 10, where:
-        - 0-3: Poor documentation
-        - 4-6: Adequate documentation
-        - 7-8: Good documentation
-        - 9-10: Excellent documentation
-        """
-        
         try:
-            # Get response from LLM
-            response = await llm.acomplete(prompt)
-            response_text = response.text
+            # Create a prompt for the LLM
+            prompt = self._create_quality_assessment_prompt(content, file_type)
             
-            # Extract JSON from response
-            json_pattern = r'```json\s*([\s\S]*?)\s*```'
-            match = re.search(json_pattern, response_text)
+            # Use the resolver to call the LLM
+            response = await call_llm_async(
+                llm=self.llm_adapter,
+                input_text=prompt,
+                as_chat=True
+            )
             
-            if match:
-                json_str = match.group(1)
-            else:
-                json_str = response_text
+            # Extract and parse the response
+            response_text = extract_content_from_response(response)
             
-            # Parse JSON
             try:
-                assessment = json.loads(json_str)
-                
+                # Try to parse as JSON
+                import json
+                result_dict = json.loads(response_text)
+                return result_dict
             except json.JSONDecodeError:
-                logger.warning("Failed to parse JSON from LLM response for documentation assessment")
+                # If not valid JSON, extract structured data using regex
+                import re
+                result_dict = {"quality_score": 0}
+                
+                # Extract quality score
+                score_match = re.search(r'quality_score["\s:]+(\d+)', response_text)
+                if score_match:
+                    try:
+                        result_dict["quality_score"] = int(score_match.group(1))
+                    except ValueError:
+                        pass
+                
+                # Extract issues
+                result_dict["issues"] = []
+                issue_matches = re.finditer(r'issue["\s:]+([^,}]+)', response_text)
+                for match in issue_matches:
+                    result_dict["issues"].append(match.group(1).strip(' "\''))
+                
+                return result_dict
                 
         except Exception as e:
-            logger.error(f"Error in documentation quality assessment: {str(e)}")
+            logger.error(f"Error in documentation quality assessment: {e}")
+            return {"error": str(e), "quality_score": 0}
+
+    def _create_quality_assessment_prompt(self, content: str, file_type: str) -> str:
+        """
+        Create a prompt for assessing documentation quality.
         
-        return assessment
-    
+        Args:
+            content: Content to analyze
+            file_type: Type of file being analyzed
+            
+        Returns:
+            Prompt for the LLM
+        """
+        # Determine documentation standards based on file type
+        if file_type.lower() == 'sol' or file_type.lower() == 'solidity':
+            doc_standards = (
+                "- NatSpec format (/// for documentation comments)\n"
+                "- @title, @author, @notice, @dev tags for contracts\n"
+                "- @param, @return, @notice for functions\n"
+                "- Documentation for state variables\n"
+                "- Explanations for complex logic"
+            )
+        else:
+            doc_standards = (
+                "- Clear file-level documentation explaining purpose\n"
+                "- Function/method documentation with parameters and return values\n"
+                "- Comments for complex sections of code\n"
+                "- Examples where appropriate"
+            )
+        
+        # Create the prompt
+        prompt = f"""
+Analyze the documentation quality in this {file_type} file.
+
+Documentation standards to check:
+{doc_standards}
+
+Rate the overall documentation quality on a scale of 0-10, where:
+- 0-2: Missing or severely inadequate documentation
+- 3-5: Basic documentation but significant gaps
+- 6-8: Good documentation with minor improvements needed
+- 9-10: Excellent, comprehensive documentation
+
+File content:
+```
+{content}
+```
+
+Provide a JSON response with the following fields:
+- quality_score: Numeric score (0-10)
+- issues: List of identified issues
+- recommendations: List of recommendations for improvement
+"""
+        return prompt
+
     async def _calculate_project_quality(self, context: Context):
         """
         Calculate project-wide documentation quality

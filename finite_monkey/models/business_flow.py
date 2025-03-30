@@ -1,22 +1,33 @@
+"""
+Models for business flow analysis in smart contracts.
+"""
+from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any, Literal
 
-class FlowFunction(BaseModel):
-    """A function call in a business flow"""
-    call: str = Field(..., description="The name of the function being called")
-    flow_vars: List[str] = Field(default_factory=list, description="Variables involved in this flow")
-
-class AttackSurface(BaseModel):
-    """A potential attack surface identified in the business flow"""
-    name: str = Field(..., description="Name of the vulnerable element")
-    type: Literal["function", "variable", "code_path", "privileged_operation"] = Field(..., description="Type of vulnerable element")
-    description: Optional[str] = Field(None, description="Description of the vulnerability")
-    related_to: Optional[str] = Field(None, description="Related function or component")
 
 class BusinessFlow(BaseModel):
-    """Business flow extracted from a function"""
-    FlowFunctions: List[FlowFunction] = Field(default_factory=list, description="List of function calls in this flow")
-    AttackSurfaces: List[AttackSurface] = Field(default_factory=list, description="List of potential attack surfaces")
-    Confidence: float = Field(default=0.0, description="Confidence score for this flow (0.0-1.0)")
-    Notes: Optional[str] = Field(None, description="Additional notes about this flow")
-    Analysis: Optional[str] = Field(None, description="Analysis of the business flow")
+    """
+    Represents a business flow within a smart contract
+    """
+    name: str = Field(..., description="Descriptive name for the flow")
+    description: str = Field(..., description="Brief description of what this flow does")
+    steps: List[str] = Field(..., description="Sequence of operations that occur in this flow")
+    functions: List[str] = Field(..., description="Main functions involved in this flow")
+    actors: List[str] = Field(default_factory=list, description="Roles/addresses that participate in this flow")
+    flow_type: str = Field(default="general", description="Type of business flow")
+    contract_name: Optional[str] = Field(None, description="Name of the contract containing this flow")
+    function_name: Optional[str] = Field(None, description="Name of the specific function if this is a function-level flow")
+
+
+class BusinessFlowAnalysisResult(BaseModel):
+    """
+    Result of business flow analysis for a smart contract
+    """
+    flows: List[BusinessFlow] = Field(
+        default_factory=list,
+        description="List of business flows identified in the contract"
+    )
+    contract_summary: str = Field(
+        default="",
+        description="Summary of the contract's business logic"
+    )

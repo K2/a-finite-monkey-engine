@@ -5,7 +5,7 @@ Utilities for extracting structured JSON from LLM responses
 import json
 import re
 import asyncio
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union, Tuple
 from loguru import logger
 
 from finite_monkey.utils.json_repair import extract_json_from_text, safe_parse_json
@@ -39,19 +39,17 @@ async def extract_json_with_schema(llm, prompt: str, schema: Dict[str, Any], max
             response_text = response.text
             
             # Extract JSON from the response
-            json_str = extract_json_from_text(response_text)
+            json_obj, debug_info = extract_json_from_complex_response(response_text)
+            logger.debug(debug_info)
             
-            # Parse and validate against schema
-            result = safe_parse_json(json_str)
-            
-            if result is None or not isinstance(result, dict):
+            if json_obj is None or not isinstance(json_obj, dict):
                 logger.warning(f"LLM returned invalid JSON (attempt {attempt+1}/{max_retries})")
                 if attempt == max_retries - 1:
                     # Last attempt, create empty result with schema structure
-                    result = _create_empty_from_schema(schema)
+                    json_obj = _create_empty_from_schema(schema)
             else:
                 # Basic schema validation
-                is_valid = _validate_against_schema(result, schema)
+                is_valid = _validate_against_schema(json_obj, schema)
                 if not is_valid and attempt < max_retries - 1:
                     # Add a more specific instruction about the validation error
                     prompt += f"\n\nYour previous response didn't match the required schema. Please try again and ensure your JSON matches the schema exactly."
@@ -59,16 +57,16 @@ async def extract_json_with_schema(llm, prompt: str, schema: Dict[str, Any], max
                     continue
                 
                 # Return validated result
-                return result
+                return json_obj
             
         except Exception as e:
             logger.error(f"Error extracting JSON (attempt {attempt+1}/{max_retries}): {str(e)}")
             if attempt == max_retries - 1:
                 # Last attempt, create empty result with schema structure
-                result = _create_empty_from_schema(schema)
+                json_obj = _create_empty_from_schema(schema)
     
     # Return the best we could get after all retries
-    return result
+    return json_obj
 
 def _validate_against_schema(data: Dict[str, Any], schema: Dict[str, Any]) -> bool:
     """
@@ -160,3 +158,133 @@ def _create_empty_from_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
             return []
     
     return result
+
+def extract_json_from_complex_response(response: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    """
+    Extract a JSON object from a potentially complex response format.
+    Handles JSON embedded in markdown, double encoding, and other edge cases.
+    
+    Args:
+        response: The response string to parse
+        
+    Returns:
+        Tuple of (parsed JSON object or None if extraction failed, debug info)
+    """
+    debug_info = []
+    debug_info.append(f"Input type: {type(response)}")
+    debug_info.append(f"Input length: {len(response)}")
+    debug_info.append(f"Input preview: {response[:100]}...")
+    
+    if not isinstance(response, str):
+        debug_info.append("Not a string, returning None")
+        return None, "\n".join(debug_info)
+    
+    # Strip whitespace
+    response = response.strip()
+    debug_info.append(f"After strip length: {len(response)}")
+    
+    # 1. Try direct JSON parsing first
+    try:
+        result = json.loads(response)
+        debug_info.append("Direct JSON parsing successful")
+        if isinstance(result, dict):
+            return result, "\n".join(debug_info)
+    except json.JSONDecodeError as e:
+        debug_info.append(f"Direct JSON parsing failed: {e}")
+    
+    # 2. Try unescaping if it looks like an escaped JSON string
+    if response.startswith('"') and response.endswith('"'):
+        try:
+            unescaped = json.loads(response)
+            debug_info.append("Unescaped double-quoted string")
+            if isinstance(unescaped, str):
+                try:
+                    result = json.loads(unescaped)
+                    debug_info.append("Successfully parsed unescaped content as JSON")
+                    if isinstance(result, dict):
+                        return result, "\n".join(debug_info)
+                except json.JSONDecodeError as e:
+                    debug_info.append(f"Failed to parse unescaped content: {e}")
+        except json.JSONDecodeError as e:
+            debug_info.append(f"Failed to unescape string: {e}")
+    
+    # 3. Try cleaning up common escaping issues
+    if '\\' in response:
+        cleaned = response.replace('\\\\', '\\').replace('\\"', '"')
+        debug_info.append("Cleaned backslashes")
+        try:
+            result = json.loads(cleaned)
+            debug_info.append("Successfully parsed cleaned string")
+            if isinstance(result, dict):
+                return result, "\n".join(debug_info)
+        except json.JSONDecodeError as e:
+            debug_info.append(f"Failed to parse cleaned string: {e}")
+    
+    # 4. Look for markdown code blocks containing JSON
+    code_block_matches = re.findall(r'```(?:json)?\s*\n(.*?)\n```', response, re.DOTALL)
+    if code_block_matches:
+        debug_info.append(f"Found {len(code_block_matches)} markdown code blocks")
+        for i, code_block in enumerate(code_block_matches):
+            try:
+                result = json.loads(code_block)
+                debug_info.append(f"Successfully parsed code block {i+1}")
+                if isinstance(result, dict):
+                    return result, "\n".join(debug_info)
+            except json.JSONDecodeError as e:
+                debug_info.append(f"Failed to parse code block {i+1}: {e}")
+    
+    # 5. Try to extract JSON-like patterns using regex
+    json_pattern = r'\{(?:[^{}]|(?:\{(?:[^{}]|(?:\{[^{}]*\}))*\}))*\}'
+    matches = re.findall(json_pattern, response)
+    if matches:
+        debug_info.append(f"Found {len(matches)} potential JSON objects using regex")
+        for i, match in enumerate(matches):
+            try:
+                result = json.loads(match)
+                debug_info.append(f"Successfully parsed regex match {i+1}")
+                if isinstance(result, dict) and "flows" in result:
+                    return result, "\n".join(debug_info)
+            except json.JSONDecodeError as e:
+                debug_info.append(f"Failed to parse regex match {i+1}: {e}")
+    
+    # 6. Last resort: Find anything that looks like our expected structure
+    if '"flows"' in response or "'flows'" in response:
+        debug_info.append("Found 'flows' key, attempting targeted extraction")
+        
+        # Try to extract a substring from 'flows' to the end of what looks like a dict
+        try:
+            flows_start = response.find('"flows"')
+            if flows_start == -1:
+                flows_start = response.find("'flows'")
+            
+            if flows_start != -1:
+                # Find the opening bracket before "flows"
+                obj_start = response.rfind('{', 0, flows_start)
+                if obj_start != -1:
+                    # Find the matching closing bracket
+                    depth = 1
+                    obj_end = -1
+                    
+                    for i in range(obj_start + 1, len(response)):
+                        if response[i] == '{':
+                            depth += 1
+                        elif response[i] == '}':
+                            depth -= 1
+                            if depth == 0:
+                                obj_end = i + 1
+                                break
+                    
+                    if obj_end != -1:
+                        potential_json = response[obj_start:obj_end]
+                        try:
+                            result = json.loads(potential_json)
+                            debug_info.append("Successfully extracted JSON object containing 'flows'")
+                            return result, "\n".join(debug_info)
+                        except json.JSONDecodeError as e:
+                            debug_info.append(f"Failed to parse extracted JSON: {e}")
+        except Exception as e:
+            debug_info.append(f"Error in targeted extraction: {e}")
+    
+    # Nothing worked
+    debug_info.append("All extraction methods failed")
+    return None, "\n".join(debug_info)

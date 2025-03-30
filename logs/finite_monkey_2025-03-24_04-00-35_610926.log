@@ -1,5 +1,0 @@
-2025-03-24 04:00:47.888 | INFO     | __main__:test_sgp_parser:131 - Parsing /home/files/git/a-finite-monkey-engine/tests/fixtures/test_inheritance.sol
-2025-03-24 04:00:48.154 | INFO     | __main__:test_sgp_parser:139 - Successfully parsed with AsyncSolidityParser
-2025-03-24 04:01:48.495 | INFO     | __main__:test_sgp_parser:154 - Found 0 contracts: 
-2025-03-24 04:01:48.495 | INFO     | __main__:test_sgp_parser:158 - Found 0 interfaces
-2025-03-24 04:01:48.495 | INFO     | __main__:main:210 - ✅ AsyncSolidityParser test PASSED

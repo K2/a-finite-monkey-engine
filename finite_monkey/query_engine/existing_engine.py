@@ -2,6 +2,7 @@
 Implementation of a compatibility layer for existing query engines.
 """
 from typing import Dict, List, Any, Optional, Union
+import asyncio
 from loguru import logger
 
 from llama_index.core.indices import VectorStoreIndex
@@ -96,8 +97,6 @@ class ExistingQueryEngine(BaseQueryEngine):
             )
         
         try:
-            import asyncio
-            
             # Execute the query using the existing engine
             response = await asyncio.to_thread(
                 self.retriever_engine.query,

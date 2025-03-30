@@ -1,5 +1,0 @@
-2025-03-24 05:00:14.277 | INFO     | __main__:test_call_graph_parse:185 - Testing AsyncCallGraph parse() method
-2025-03-24 05:01:23.568 | INFO     | __main__:test_call_graph_parse:203 - Using base_dir: /home/files/git/a-finite-monkey-engine
-2025-03-24 05:01:24.318 | INFO     | __main__:test_call_graph_parse:204 - Using src_dir: examples/src
-2025-03-24 05:01:26.289 | INFO     | finite_monkey.utils.async_call_graph:create:67 - whitelist.json not found, will analyze all functions
-2025-03-24 05:01:26.290 | INFO     | finite_monkey.utils.async_call_graph:create:75 - modifier_whitelist.json not found, will analyze all modifiers

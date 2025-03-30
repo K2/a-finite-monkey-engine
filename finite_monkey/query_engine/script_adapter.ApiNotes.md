@@ -1,94 +1,82 @@
-# Query Engine Script Adapter
+# Script Adapter for Query Enginesgines
 
 ## Overview
 
-The `QueryEngineScriptAdapter` connects the FLARE query engine with script generation capabilities. It translates analysis requests into executable Python scripts that can be used for security analysis, testing, and remediation of smart contracts.
+The `QueryEngineScriptAdapter` serves as a bridge between query engines and script generation capabilities. It leverages the reasoning power of the FLARE query engine to generate executable Python scripts based on code analysis, security findings, or specific requirements.quirements.
 
-## Key Components
+## Key Features
 
-### Models
+1. **Context-Aware Script Generation**
+   - Uses code snippets and file paths as context for generating relevant scripts   - Uses code snippets and file paths as context for generating relevant scripts
+   - Adapts to different script types (analysis, test, fix, generation)
 
-1. **ScriptGenerationRequest**: A Pydantic model that encapsulates all parameters needed for script generation:
-   - `query`: The specific task or analysis to perform
-   - `context_snippets`: Code snippets providing context
-   - `file_paths`: Relevant file paths for reference
-   - `target_path`: Where to save the generated script
-   - `script_type`: Type of script to generate (analysis, test, fix, generation)
-   - `metadata`: Additional information
+2. **Configuration Loading**
+   - Loads settings from a configuration file   - Loads settings from a configuration file
+   - Supports commented JSON with special handlingth special handling
+   - Falls back to sensible defaults when configuration is missing   - Falls back to sensible defaults when configuration is missing
 
-2. **ScriptGenerationResult**: A Pydantic model containing the results of script generation:
-   - `script_content`: The actual generated script content
-   - `script_path`: Where the script was saved
-   - `execution_command`: Command to run the script
-   - `success`: Whether generation was successful
-   - `error`: Error message if generation failed
-   - `metadata`: Additional information about the generation process
+3. **Script Extraction and Formatting**
+   - Extracts code blocks from query responses
+   - Handles different fence formats (markdown, XML)
+   - Selects the most appropriate code block based on size and format   - Selects the most appropriate code block based on size and format
 
-### Adapter Class
+4. **File Management**4. **File Management**
+   - Generates appropriate file paths based on script type and queryype and query
+   - Creates necessary directories
+   - Determines appropriate execution commandss
 
-The `QueryEngineScriptAdapter` class is responsible for:
+## Implementation Details
 
-1. **Configuration Management**:
-   - Loading GenAIScript configuration
-   - Managing output directories
-   - Setting up default paths
+### Request Structure### Request Structure
+The `ScriptGenerationRequest` object contains all necessary information for script generation:ject contains all necessary information for script generation:
+- The query text that specifies what to generate- The query text that specifies what to generate
+- Context snippets (code fragments)
+- Relevant file paths
+- Optional target path for the generated scriptnerated script
+- Script type (analysis, test, fix, generation)
+- Additional metadata
 
-2. **Script Generation**:
-   - Constructing appropriate queries
-   - Using the FLARE engine to generate responses
-   - Extracting code from responses
-   - Saving scripts to disk
+### Result Structure
+The `ScriptGenerationResult` provides comprehensive information about the generated script:The `ScriptGenerationResult` provides comprehensive information about the generated script:
+- The full script content
+- The path where the script was saved- The path where the script was saved
+- The command to execute the script
+- Success/failure status
+- Error information if generation failed
+- Metadata about the generation process
 
-3. **Response Processing**:
-   - Handling different code fence formats (markdown, XML)
-   - Selecting the best/largest code block
-   - Properly formatting scripts
+### Query Construction
+The adapter builds specialized queries for the FLARE engine that:The adapter builds specialized queries for the FLARE engine that:
+1. Specify the purpose based on script type
+2. Include relevant code context
+3. List file paths
+4. Establish requirements for the generated script
+5. Incorporate the original user query5. Incorporate the original user query
 
-## Integration with GenAIScript
+### Error Handling### Error Handling
+The adapter implements robust error handling:error handling:
+- Safely loads configuration files with fallbacks- Safely loads configuration files with fallbacks
+- Handles extraction failures gracefully
+- Provides detailed error information in the result
+- Ensures directories exist before writing files
 
-The adapter integrates with the GenAIScript configuration through:
+## Integration Points
 
-1. Loading the `genaiscript.config.json` file which contains:
-   - Model aliases for different task types
-   - Fence format preferences
-   - Other configuration options
+- **Query Engine**: Uses the `FlareQueryEngine` for generating script contentpt content
+- **File System**: Interacts with the filesystem for configuration loading and script saving- **File System**: Interacts with the filesystem for configuration loading and script saving
+- **Configuration**: Integrates with the GenAIScript configuration system: Integrates with the GenAIScript configuration system
+- **Pipeline Context**: Uses the context from the pipeline when available- **Pipeline Context**: Uses the context from the pipeline when available
 
-2. Using the configuration to determine:
-   - Which model to use for reasoning
-   - How to extract code from responses
-   - Default paths and behaviors
+## Usage Patterns
 
-## Workflow
-
-The typical workflow is:
-
-1. **Request Creation**: Create a `ScriptGenerationRequest` with query and context
-2. **Query Construction**: Format an appropriate prompt for the FLARE engine
-3. **Script Generation**: Execute the query and process the response
-4. **Content Extraction**: Extract script content from the response
-5. **Script Saving**: Save the script to the specified location
-6. **Result Return**: Return a `ScriptGenerationResult` with all relevant information
-
-## Usage Example
-
+### Basic Script Generation
 ```python
-# Initialize adapter with a FLARE query engine
-adapter = QueryEngineScriptAdapter(flare_engine)
-
-# Create a request
-request = ScriptGenerationRequest(
-    query="Create a script to detect reentrancy vulnerabilities",
-    context_snippets=["contract SimpleStorage { ... }"],
-    file_paths=["contracts/SimpleStorage.sol"],
+request = ScriptGenerationRequest(request = ScriptGenerationRequest(
+    query="Create a security analysis script for the ERC20 contract",a security analysis script for the ERC20 contract",
+    context_snippets=[contract_code],    context_snippets=[contract_code],
+    file_paths=[contract_path],
     script_type="analysis"
 )
+result = await script_adapter.generate_script(request, context)t(request, context)
 
-# Generate the script
-result = await adapter.generate_script(request)
 
-# Check result and use the script
-if result.success:
-    print(f"Script saved to: {result.script_path}")
-    print(f"Run with: {result.execution_command}")
-else:
-    print(f"Error: {result.error}")

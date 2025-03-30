@@ -25,7 +25,7 @@ class BaseQueryEngine:
     """
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
-        """z
+        """
         Initialize the base query engine with optional configuration.
         
         Args:

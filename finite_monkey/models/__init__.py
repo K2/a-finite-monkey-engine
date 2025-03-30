@@ -12,7 +12,7 @@ from .analysis import (
     VulnerabilityReport,
 )
 from .metrics import AgentMetrics, ToolUsageMetrics, WorkflowMetrics, TelemetryRecord
-from .business_flow import BusinessFlow, FlowFunction
+from .business_flow import BusinessFlow
 from .security import SecurityFinding, SecurityAnalysisResult
 
 __all__ = [
