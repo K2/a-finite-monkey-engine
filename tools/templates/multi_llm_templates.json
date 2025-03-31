@@ -1,0 +1,6 @@
+{
+  "openai": "Create a prompt for GPT models to fully understand: {text}",
+  "gemma": "Generate a Gemma-optimized prompt to comprehend: {text}",
+  "llama": "Design a Llama-specific prompt for understanding: {text}",
+  "mistral": "Craft a Mistral-targeted prompt about: {text}"
+}

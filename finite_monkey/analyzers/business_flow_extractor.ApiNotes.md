@@ -33,12 +33,56 @@ The "method_first" approach is recommended as it:
 - Function-level is better when contracts have many functions (>5)
 - Contract-level is better when functions are tightly coupled
 
-## Implementation Notes
+## Derived vs. Acquired Analysis Taxonomy
 
-The class implements both approaches while maintaining a consistent interface:
-- The `process()` method delegates to the appropriate processing method based on configuration
-- The context structure is the same for both approaches
-- Function-level flows include additional metadata linking them to specific functions
+The BusinessFlowExtractor implements a clear conceptual distinction between two primary approaches to vulnerability analysis:
+
+### Derived Flows
+- **Definition**: Flows that are algorithmically derived through code path traversal and static analysis
+- **Source**: Direct analysis of smart contract code
+- **Characteristics**: 
+  - More technical and precise about code paths
+  - Higher confidence in function call sequences
+  - Less context about developer intent or business logic
+  - Can identify vulnerabilities that aren't discussed in issues
+
+### Acquired Flows
+- **Definition**: Flows that are acquired from human descriptions in issues, pull requests, or discussions
+- **Source**: Natural language descriptions of issues, bugs or vulnerabilities
+- **Characteristics**:
+  - Richer in contextual understanding and intent
+  - May contain insights not obvious from code alone
+  - Often includes specific attack scenarios
+  - Highlights concerns raised by security researchers
+
+### Hybrid Flows
+- **Definition**: Combined analysis leveraging both derived and acquired approaches
+- **Characteristics**:
+  - Most comprehensive vulnerability detection
+  - Technical precision from code analysis
+  - Contextual understanding from human descriptions
+  - Highest confidence when both sources align
+
+## Implementation Details
+
+### Flow Source Detection
+The system automatically determines which analysis approach to use based on available inputs:
+- If only code is available: Uses derived approach
+- If only issue text is available: Uses acquired approach
+- If both are available: Uses hybrid approach
+
+### Merging Logic
+When merging derived and acquired flows:
+1. Start with the derived flow as the base (for technical accuracy)
+2. Add unique flow functions from acquired analysis
+3. Add unique attack surfaces from acquired analysis
+4. Combine notes and analysis sections to retain all context
+5. Use the higher confidence score from either analysis
+
+### Metadata Tracking
+Every analyzed flow includes metadata indicating its source:
+- `flow_source`: One of "derived", "acquired", or "hybrid"
+- This metadata is preserved throughout the analysis pipeline and reporting
 
 ## Example Usage
 

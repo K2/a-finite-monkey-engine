@@ -1,0 +1,9 @@
+
+            Based on the following document, generate a detailed prompt that can be used
+            to guide an LLM to understand and respond about this content:
+            
+            {text}
+            
+            Focus on the key concepts, patterns, and insights from this document.
+            The prompt should help an LLM develop a thorough understanding of this content.
+            

@@ -1,0 +1,11 @@
+{
+  "default": "Analyze this code for security vulnerabilities. Identify specific threat patterns related to: SQL injection, XSS, command injection, path traversal, insecure deserialization, and authentication issues. For each vulnerability, provide a detailed explanation of the issue, its severity, and recommended fixes.\n\nCode to analyze:\n\n{code}",
+  
+  "python": "Analyze this Python code for security vulnerabilities. Look for issues such as: SQL injection (using string formatting in queries), command injection (os.system with user input), path traversal (unvalidated file paths), insecure deserialization (pickle loading), weak cryptography, and authentication bypass. Rate each vulnerability severity as high, medium, or low.\n\nPython code to analyze:\n\n{code}",
+  
+  "javascript": "Analyze this JavaScript code for security vulnerabilities. Focus on common web security issues like: XSS (unsanitized DOM manipulation), CSRF, prototype pollution, insecure API calls, improper authentication, and injection vulnerabilities. Rate each vulnerability severity as high, medium, or low.\n\nJavaScript code to analyze:\n\n{code}",
+  
+  "java": "Analyze this Java code for security vulnerabilities. Check for: SQL injection (using Statement instead of PreparedStatement), XXE vulnerabilities, insecure random number generation, broken access control, incomplete validation, and deserialization issues. Rate each vulnerability severity as high, medium, or low.\n\nJava code to analyze:\n\n{code}",
+  
+  "php": "Analyze this PHP code for security vulnerabilities. Look for: SQL injection, XSS, CSRF, file inclusion vulnerabilities, command injection, insecure file operations, and authentication issues. Rate each vulnerability severity as high, medium, or low.\n\nPHP code to analyze:\n\n{code}"
+}

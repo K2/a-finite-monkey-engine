@@ -34,7 +34,9 @@ except ImportError:
         'GENERATE_PROMPTS': True,
         'USE_OLLAMA_FOR_PROMPTS': True,
         'PROMPT_MODEL': "gemma:2b",
-        'MULTI_LLM_PROMPTS': False
+        'MULTI_LLM_PROMPTS': False,
+        'OLLAMA_TIMEOUT': 900,
+        'PROMPT_TIMEOUT': 900
     })
 
 def run_sync(func):
@@ -267,6 +269,7 @@ class SimpleVectorStore:
         self.ipex_fp16 = getattr(app_config, "IPEX_FP16", False)
         self.ollama_model = getattr(app_config, "OLLAMA_MODEL", "nomic-embed-text")
         self.ollama_url = getattr(app_config, "OLLAMA_URL", "http://localhost:11434")
+        self.ollama_timeout = getattr(app_config, "OLLAMA_TIMEOUT", 900)
         
         # Prompt generation settings
         self.generate_prompts = os.environ.get("GENERATE_PROMPTS", "").lower() in ("true", "1", "yes") or getattr(app_config, "GENERATE_PROMPTS", True)
@@ -274,20 +277,42 @@ class SimpleVectorStore:
         self.prompt_model = os.environ.get("PROMPT_MODEL") or getattr(app_config, "PROMPT_MODEL", "gemma:2b")
         self.multi_llm_prompts = os.environ.get("MULTI_LLM_PROMPTS", "").lower() in ("true", "1", "yes") or getattr(app_config, "MULTI_LLM_PROMPTS", False)
         
-        logger.info(f"Prompt generation settings: enabled={self.generate_prompts}, use_ollama={self.use_ollama_for_prompts}, model={self.prompt_model}, multi_llm={self.multi_llm_prompts}")
+        # Read timeout settings from config - default to OLLAMA_TIMEOUT if PROMPT_TIMEOUT not specified
+        self.prompt_timeout = getattr(app_config, "PROMPT_TIMEOUT", self.ollama_timeout)
+        
+        logger.info(f"Prompt generation settings: enabled={self.generate_prompts}, use_ollama={self.use_ollama_for_prompts}, "
+                   f"model={self.prompt_model}, multi_llm={self.multi_llm_prompts}, timeout={self.prompt_timeout}s")
         
         # Initialize prompt generator if prompt generation is enabled
         if self.generate_prompts:
             try:
                 from vector_store_prompts import PromptGenerator
                 logger.info(f"Initializing prompt generator with model: {self.prompt_model}")
-                self.prompt_generator = PromptGenerator(
-                    generate_prompts=self.generate_prompts,
-                    use_ollama_for_prompts=self.use_ollama_for_prompts,
-                    prompt_model=self.prompt_model,
-                    ollama_url=self.ollama_url,
-                    multi_llm_prompts=self.multi_llm_prompts
-                )
+                
+                # Check if PromptGenerator accepts timeout parameters
+                import inspect
+                prompt_gen_params = inspect.signature(PromptGenerator.__init__).parameters
+                prompt_gen_kwargs = {
+                    "generate_prompts": self.generate_prompts,
+                    "use_ollama_for_prompts": self.use_ollama_for_prompts,
+                    "prompt_model": self.prompt_model,
+                    "ollama_url": self.ollama_url,
+                    "multi_llm_prompts": self.multi_llm_prompts
+                }
+                
+                # Add timeout params if the PromptGenerator accepts them
+                if 'timeout' in prompt_gen_params:
+                    prompt_gen_kwargs['timeout'] = self.prompt_timeout
+                if 'ollama_timeout' in prompt_gen_params:
+                    prompt_gen_kwargs['ollama_timeout'] = self.ollama_timeout
+                    
+                self.prompt_generator = PromptGenerator(**prompt_gen_kwargs)
+                
+                # Try to set timeout directly on the generator's client if possible
+                if hasattr(self.prompt_generator, 'client') and hasattr(self.prompt_generator.client, 'timeout'):
+                    logger.info(f"Setting timeout directly on prompt generator client: {self.prompt_timeout}s")
+                    self.prompt_generator.client.timeout = self.prompt_timeout
+                    
             except ImportError as e:
                 logger.warning(f"Could not import PromptGenerator: {e}, prompt generation will be disabled")
                 self.prompt_generator = None
@@ -295,47 +320,35 @@ class SimpleVectorStore:
             logger.info("Prompt generation is disabled")
             self.prompt_generator = None
         
-        self._index = None
-        self._documents = []
+        # Create structured directory hierarchy for per-document storage
+        collection_dir = os.path.join(self.storage_dir, collection_name)
+        os.makedirs(collection_dir, exist_ok=True)
+        
+        # Create subdirectories for each type of data
+        self.metadata_dir = os.path.join(collection_dir, "metadata")
+        self.prompts_dir = os.path.join(collection_dir, "prompts")
+        self.patterns_dir = os.path.join(collection_dir, "patterns")
+        self.flows_dir = os.path.join(collection_dir, "flows")
+        self.graph_fragments_dir = os.path.join(collection_dir, "graph_fragments")
+        
+        # Ensure all directories exist
+        for dir_path in [self.metadata_dir, self.prompts_dir, self.patterns_dir, 
+                        self.flows_dir, self.graph_fragments_dir]:
+            os.makedirs(dir_path, exist_ok=True)
         
         # Ensure storage directory exists
         os.makedirs(self.storage_dir, exist_ok=True)
         os.makedirs(os.path.join(self.storage_dir, collection_name), exist_ok=True)
         
+        # Initialize document array BEFORE initializing the index
+        self._documents = []
+        self._prompts_loaded = False
+        self._patterns_loaded = False
+        self._flows_loaded = False
+        
         # Initialize the vector index
+        self._index = None
         self._initialize_index()
-
-    def _create_document_fingerprint(self, document) -> str:
-        """
-        Create a unique fingerprint for document deduplication.
-        
-        Args:
-            document: Document dictionary or string
-            
-        Returns:
-            String fingerprint (SHA-256 hash)
-        """
-        # Handle both string and dictionary inputs
-        if isinstance(document, str):
-            # If a string is passed, use it directly as the text content
-            text = document
-            metadata = {}
-        else:
-            # Otherwise, extract text and metadata from the dictionary
-            text = document.get('text', '')
-            metadata = document.get('metadata', {})
-        
-        # Include important metadata fields in the fingerprint
-        key_metadata = []
-        for field in ['title', 'id', 'source', 'url', 'file_path']:
-            if field in metadata and metadata[field]:
-                key_metadata.append(f"{field}:{metadata[field]}")
-        
-        # Combine text and key metadata for fingerprinting
-        fingerprint_content = text + '|' + '|'.join(key_metadata)
-        
-        # Create SHA-256 hash
-        return hashlib.sha256(fingerprint_content.encode('utf-8')).hexdigest()
 
     def _initialize_index(self):
         """Initialize vector index or load an existing one."""
@@ -347,44 +360,30 @@ class SimpleVectorStore:
             )
             from llama_index.core.settings import Settings
             
-            # Setup embedding model
+            # Setup embedding model with clearer categorization
             embed_model = None
+            
+            # Determine if we should use derived (local) or acquired (remote) embeddings
             if self.embedding_model == "ipex":
-                # Create Intel IPEX optimized embedding model
-                embed_model = self._create_ipex_embedding_model()
+                # DERIVED: Intel IPEX optimized embedding model processed locally
+                embed_model = self._create_derived_embedding_model("ipex")
+                logger.info("Using derived embeddings via IPEX")
             elif self.embedding_model == "ollama":
-                # Create Ollama embedding model
-                embed_model = self._create_ollama_embedding_model()
+                # ACQUIRED: Embeddings obtained from external Ollama service
+                embed_model = self._create_acquired_embedding_model("ollama")
+                logger.info("Using acquired embeddings via Ollama")
             else:
-                # Default to local HuggingFace embedding - avoid asyncio.run()
+                # Default to local HuggingFace embedding - also DERIVED
                 try:
                     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-                    # Handle different execution contexts properly
-                    try:
-                        # Check if we're in an event loop
-                        loop = asyncio.get_event_loop()
-                        if loop.is_running():
-                            # We're already in an async context
-                            def create_embedding():
-                                return HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
-                            # Run synchronously in a thread
-                            import concurrent.futures
-                            with concurrent.futures.ThreadPoolExecutor() as executor:
-                                embed_model = executor.submit(create_embedding).result()
-                        else:
-                            # No running loop, create synchronously
-                            embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
-                    except RuntimeError:
-                        # No event loop, create synchronously
-                        logger.info("Creating HuggingFace embedding synchronously (no event loop)")
-                        embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
+                    embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
+                    logger.info("Using derived embeddings via HuggingFace")
                 except ImportError:
                     logger.warning("HuggingFace embedding not available, using default")
                     embed_model = None
             
-            # Set up Settings object with our embedding model
+            # Update the global settings with our embed model
             if embed_model:
-                # Update the global settings with our embed model
                 Settings.embed_model = embed_model
                 logger.info(f"Settings configured with custom embedding model: {type(embed_model).__name__}")
             
@@ -395,35 +394,60 @@ class SimpleVectorStore:
                 # Load existing index
                 logger.info(f"Loading existing index from {index_dir}")
                 storage_context = StorageContext.from_defaults(persist_dir=index_dir)
-                # Load using the new approach (no ServiceContext)
                 self._index = load_index_from_storage(storage_context)
                 
-                # Load document metadata
-                metadata_path = os.path.join(index_dir, "document_metadata.json")
-                if os.path.exists(metadata_path):
-                    with open(metadata_path, 'r') as f:
+                # Load document metadata - first check document_index.json (new format)
+                index_path = os.path.join(index_dir, "document_index.json")
+                if os.path.exists(index_path):
+                    with open(index_path, 'r') as f:
+                        index_data = json.load(f)
+                        # Load individual documents using the IDs in the index
+                        self._documents = []
+                        loaded_count = 0
+                        for doc_id in index_data.get("document_ids", []):
+                            safe_id = re.sub(r'[^\w\-\.]', '_', str(doc_id))
+                            metadata_file = os.path.join(self.metadata_dir, f"{safe_id}.json")
+                            if os.path.exists(metadata_file):
+                                with open(metadata_file, 'r') as doc_f:
+                                    doc_data = json.load(doc_f)
+                                    self._documents.append(doc_data)
+                                    loaded_count += 1
+                        logger.info(f"Loaded {loaded_count} documents from per-document files")
+                # Check for legacy document_metadata.json format
+                elif os.path.exists(os.path.join(index_dir, "document_metadata.json")):
+                    with open(os.path.join(index_dir, "document_metadata.json"), 'r') as f:
                         self._documents = json.load(f)
-                logger.info(f"Loaded index with {len(self._documents)} documents")
+                    logger.info(f"Loaded {len(self._documents)} documents from legacy metadata file")
+                # Final check for legacy documents.json format
+                elif os.path.exists(os.path.join(index_dir, "documents.json")):
+                    with open(os.path.join(index_dir, "documents.json"), 'r') as f:
+                        self._documents = json.load(f)
+                    logger.info(f"Loaded {len(self._documents)} documents from legacy documents.json file")
+                else:
+                    logger.warning("No document metadata found, starting with empty documents list")
+                    self._documents = []
             else:
                 # Create new index
                 logger.info(f"Creating new index in {index_dir}")
                 from llama_index.core.schema import Document
-                # Create a simple document for initialization
                 doc = Document(text="Placeholder document for initialization")
-                # Create index using the new approach (no ServiceContext)
                 self._index = VectorStoreIndex.from_documents([doc])
-                # Save the index
                 os.makedirs(index_dir, exist_ok=True)
                 self._index.storage_context.persist(persist_dir=index_dir)
-                # Initialize documents list
                 self._documents = []
-                # Save metadata synchronously to avoid asyncio issues
-                metadata_path = os.path.join(index_dir, "document_metadata.json")
-                with open(metadata_path, 'w') as f:
-                    json.dump(self._documents, f)
+                # Save empty document index
+                document_index = {
+                    "document_ids": [],
+                    "last_updated": datetime.now().isoformat(),
+                    "total_count": 0
+                }
+                with open(os.path.join(index_dir, "document_index.json"), 'w') as f:
+                    json.dump(document_index, f)
                 logger.info("Created new vector index")
         except Exception as e:
             logger.error(f"Error initializing vector index: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             self._index = None
 
     def _create_ipex_embedding_model(self):
@@ -455,6 +479,91 @@ class SimpleVectorStore:
             from llama_index.embeddings.huggingface import HuggingFaceEmbedding
             logger.warning("Falling back to standard HuggingFace embedding")
             return HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
+
+    def _create_derived_embedding_model(self, model_type: str):
+        """
+        Create a locally-derived embedding model (processed on this machine).
+        
+        Args:
+            model_type: Type of model ("ipex" or "huggingface")
+        
+        Returns:
+            Configured embedding model
+        """
+        if model_type == "ipex":
+            return self._create_ipex_embedding_model()
+        else:  # Default to huggingface
+            from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+            logger.info(f"Creating derived HuggingFace embedding with model: BAAI/bge-small-en-v1.5")
+            return HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
+
+    def _create_acquired_embedding_model(self, provider: str):
+        """
+        Create an embedding model that acquires embeddings from external services.
+        
+        Args:
+            provider: Service provider ("ollama" or other supported providers)
+        
+        Returns:
+            Configured embedding model
+        """
+        if provider == "ollama":
+            try:
+                from llama_index.embeddings.ollama import OllamaEmbedding
+                logger.info(f"Creating acquired Ollama embedding with model: {self.ollama_model}")
+                return OllamaEmbedding(
+                    model_name=self.ollama_model,
+                    base_url=self.ollama_url,
+                    timeout=self.ollama_timeout
+                )
+            except ImportError:
+                logger.warning("Ollama embedding not available, falling back to derived model")
+                return self._create_derived_embedding_model("huggingface")
+        else:
+            logger.warning(f"Unknown acquired embedding provider: {provider}, falling back to derived model")
+            return self._create_derived_embedding_model("huggingface")
+
+    def _create_document_fingerprint(self, document) -> str:
+        """
+        Create a unique fingerprint for document deduplication.
+        
+        Args:
+            document: Document dictionary or string
+            
+        Returns:
+            String fingerprint (SHA-256 hash)
+        """
+        # Handle both string and dictionary inputs
+        if isinstance(document, str):
+            # If a string is passed, use it directly as the text content
+            text = document
+            metadata = {}
+        else:
+            # Otherwise, extract text and metadata from the dictionary
+            text = document.get('text', '')
+            metadata = document.get('metadata', {})
+        
+        # Create a string to hash
+        fingerprint_content = text
+        key_metadata = []
+        
+        # Include important metadata fields in the fingerprint
+        for field in ['title', 'id', 'source', 'url', 'file_path']:
+            if field in metadata and metadata[field]:
+                if field == 'file_path':
+                    # For file paths, use basename to avoid path issues
+                    value = os.path.basename(metadata[field])
+                    key_metadata.append(f"{field}:{value}")
+                else:
+                    key_metadata.append(f"{field}:{metadata[field]}")
+        if key_metadata:
+            fingerprint_content += '|' + '|'.join(key_metadata)
+        
+        # Create SHA-256 hash
+        import hashlib
+        fingerprint = hashlib.sha256(fingerprint_content.encode('utf-8')).hexdigest()
+        
+        return fingerprint
 
     async def _load_checkpoint(self, checkpoint_path: str) -> Dict[str, Any]:
         """
@@ -513,10 +622,11 @@ class SimpleVectorStore:
 
     async def _save_document_metadata(self, index_dir: str) -> bool:
         """
-        Save document metadata to disk using async I/O.
+        Save document metadata using a per-document file approach for scalability.
+        Each document's data is stored in separate files within dedicated folders.
         
         Args:
-            index_dir: Directory where the vector store index is saved
+            index_dir: Base directory where the vector store index is saved
             
         Returns:
             Success status
@@ -524,45 +634,349 @@ class SimpleVectorStore:
         try:
             import aiofiles
             import json
+            import os
             
-            metadata_path = os.path.join(index_dir, "document_metadata.json")
-            os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
+            # Create a document index for lookup
+            document_index = {
+                "document_ids": [doc.get('id') for doc in self._documents if doc.get('id')],
+                "last_updated": datetime.now().isoformat(),
+                "total_count": len(self._documents)
+            }
             
-            # Diagnostic: Count prompts before saving
-            prompt_count = 0
-            multi_prompt_count = 0
+            # Save the index file
+            index_file_path = os.path.join(index_dir, "document_index.json")
+            async with aiofiles.open(index_file_path, 'w') as f:
+                await f.write(json.dumps(document_index))
+            
+            # Process each document and save to individual files
+            success_count = 0
             for doc in self._documents:
-                metadata = doc.get('metadata', {})
-                if 'prompt' in metadata and metadata['prompt']:
-                    prompt_count += 1
-                elif 'multi_llm_prompts' in metadata and metadata['multi_llm_prompts']:
-                    multi_prompt_count += 1
-            
-            logger.info(f"About to save metadata: {len(self._documents)} documents, {prompt_count} with prompts, {multi_prompt_count} with multi-prompts")
-            
-            # Use a custom JSON serializer to handle any non-serializable objects
-            def json_serializer(obj):
-                if isinstance(obj, (dict, list, str, int, float, bool, type(None))):
-                    return obj
-                return str(obj)
-            
-            json_data = json.dumps(self._documents, default=json_serializer)
-            
-            async with aiofiles.open(metadata_path, 'w') as f:
-                await f.write(json_data)
+                doc_id = doc.get('id')
+                if not doc_id:
+                    continue
                 
-            logger.debug(f"Document metadata saved to {metadata_path}")
+                # Create a sanitized filename from the document ID
+                safe_id = re.sub(r'[^\w\-\.]', '_', str(doc_id))
+                
+                # Extract document components
+                metadata = doc.get('metadata', {}).copy()
+                
+                # 1. Extract specialized data
+                prompts_data = {}
+                for field in ['prompt', 'multi_llm_prompts', 'invariant_analysis', 'general_flaw_pattern']:
+                    if field in metadata:
+                        prompts_data[field] = metadata.pop(field)
+                
+                patterns_data = {}
+                for field in ['quick_checks', 'api_interactions', 'cognitive_biases', 'counterfactuals']:
+                    if field in metadata:
+                        patterns_data[field] = metadata.pop(field)
+                
+                flows_data = {}
+                for field in ['call_flow', 'call_flow_graph', 'vulnerable_paths', 'entry_points']:
+                    if field in metadata:
+                        flows_data[field] = metadata.pop(field)
+                
+                graph_data = {}
+                for field in list(metadata.keys()):
+                    if field.startswith('graph_'):
+                        graph_data[field] = metadata.pop(field)
+                
+                # 2. Save core metadata (without specialized fields)
+                metadata_file = os.path.join(self.metadata_dir, f"{safe_id}.json")
+                core_doc = {
+                    'id': doc_id,
+                    'metadata': metadata,
+                    'timestamp': doc.get('timestamp', datetime.now().isoformat())
+                }
+                async with aiofiles.open(metadata_file, 'w') as f:
+                    await f.write(json.dumps(core_doc, default=lambda x: str(x) if not isinstance(x, (dict, list, str, int, float, bool, type(None))) else x))
+                
+                # 3. Save prompt data if exists
+                if prompts_data:
+                    prompt_file = os.path.join(self.prompts_dir, f"{safe_id}.json")
+                    async with aiofiles.open(prompt_file, 'w') as f:
+                        await f.write(json.dumps(prompts_data, default=lambda x: str(x) if not isinstance(x, (dict, list, str, int, float, bool, type(None))) else x))
+                
+                # 4. Save patterns data if exists
+                if patterns_data:
+                    pattern_file = os.path.join(self.patterns_dir, f"{safe_id}.json")
+                    async with aiofiles.open(pattern_file, 'w') as f:
+                        await f.write(json.dumps(patterns_data, default=lambda x: str(x) if not isinstance(x, (dict, list, str, int, float, bool, type(None))) else x))
+                
+                # 5. Save flows data if exists
+                if flows_data:
+                    flow_file = os.path.join(self.flows_dir, f"{safe_id}.json")
+                    async with aiofiles.open(flow_file, 'w') as f:
+                        await f.write(json.dumps(flows_data, default=lambda x: str(x) if not isinstance(x, (dict, list, str, int, float, bool, type(None))) else x))
+                
+                # 6. Save graph data if exists
+                if graph_data:
+                    graph_file = os.path.join(self.graph_fragments_dir, f"{safe_id}.json")
+                    async with aiofiles.open(graph_file, 'w') as f:
+                        await f.write(json.dumps(graph_data, default=lambda x: str(x) if not isinstance(x, (dict, list, str, int, float, bool, type(None))) else x))
+                
+                success_count += 1
+            
+            logger.info(f"Successfully saved {success_count} documents to individual files")
             return True
         except Exception as e:
             logger.error(f"Error saving document metadata: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 
-    async def add_documents(self, documents: List[Any], show_progress: bool = True) -> bool:
-        """ 
-        Add documents to the vector store with deduplication, progress tracking, and resumption capability.
+    async def _load_and_attach_prompts(self):
+        """Load specialized data for all documents."""
+        try:
+            # Get all document IDs
+            document_ids = [doc.get('id') for doc in self._documents if doc.get('id')]
+            logger.info(f"Loading specialized data for {len(document_ids)} documents")
+            
+            # Keep track of loaded items for reporting
+            prompt_count = 0
+            pattern_count = 0
+            flow_count = 0
+            
+            # Process each document
+            for doc in self._documents:
+                doc_id = doc.get('id')
+                if not doc_id:
+                    continue
+                
+                # Create a sanitized filename from the document ID
+                safe_id = re.sub(r'[^\w\-\.]', '_', str(doc_id))
+                
+                # Load prompt data if exists
+                prompt_file = os.path.join(self.prompts_dir, f"{safe_id}.json")
+                if os.path.exists(prompt_file):
+                    async with aiofiles.open(prompt_file, 'r') as f:
+                        content = await f.read()
+                        prompts_data = json.loads(content)
+                        
+                        # Add each prompt field to document metadata
+                        for field, value in prompts_data.items():
+                            doc['metadata'][field] = value
+                            
+                        prompt_count += 1
+                
+                # Load patterns data if exists
+                pattern_file = os.path.join(self.patterns_dir, f"{safe_id}.json")
+                if os.path.exists(pattern_file):
+                    async with aiofiles.open(pattern_file, 'r') as f:
+                        content = await f.read()
+                        patterns_data = json.loads(content)
+                        
+                        # Add each pattern field to document metadata
+                        for field, value in patterns_data.items():
+                            doc['metadata'][field] = value
+                            
+                        pattern_count += 1
+                
+                # Load flows data if exists
+                flow_file = os.path.join(self.flows_dir, f"{safe_id}.json")
+                if os.path.exists(flow_file):
+                    async with aiofiles.open(flow_file, 'r') as f:
+                        content = await f.read()
+                        flows_data = json.loads(content)
+                        
+                        # Add each flow field to document metadata
+                        for field, value in flows_data.items():
+                            doc['metadata'][field] = value
+                            
+                        flow_count += 1
+                
+                # Load graph data if exists
+                graph_file = os.path.join(self.graph_fragments_dir, f"{safe_id}.json")
+                if os.path.exists(graph_file):
+                    async with aiofiles.open(graph_file, 'r') as f:
+                        content = await f.read()
+                        graph_data = json.loads(content)
+                        
+                        # Add each graph field to document metadata
+                        for field, value in graph_data.items():
+                            doc['metadata'][field] = value
+            
+            logger.info(f"Loaded and attached specialized data: {prompt_count} prompts, {pattern_count} patterns, {flow_count} flows")
+            
+            # Set flags to indicate data is loaded
+            self._prompts_loaded = True
+            self._patterns_loaded = True
+            self._flows_loaded = True
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error loading and attaching specialized data: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    async def verify_storage(self) -> Dict[str, Any]:
+        """
+        Verify that the document storage system is working correctly.
+        Performs comprehensive checks on the file structure and document counts.
+        
+        Returns:
+            Verification report with counts, file sizes, and status
+        """
+        try:
+            # Check directory structure
+            collection_dir = os.path.join(self.storage_dir, self.collection_name)
+            
+            directories = {
+                "collection": collection_dir,
+                "metadata": self.metadata_dir,
+                "prompts": self.prompts_dir,
+                "patterns": self.patterns_dir, 
+                "flows": self.flows_dir,
+                "graphs": self.graph_fragments_dir
+            }
+            
+            report = {
+                "directories": {},
+                "document_counts": {},
+                "vector_index": {},
+                "status": "unknown"
+            }
+            
+            # Check each directory
+            for name, dir_path in directories.items():
+                dir_exists = os.path.exists(dir_path) and os.path.isdir(dir_path)
+                report["directories"][name] = {
+                    "exists": dir_exists,
+                    "path": dir_path
+                }
+                
+                if dir_exists:
+                    files = [f for f in os.listdir(dir_path) if f.endswith('.json')]
+                    report["directories"][name]["file_count"] = len(files)
+                    if files:
+                        report["directories"][name]["sample_file"] = files[0]
+            
+            # Check document index
+            index_path = os.path.join(collection_dir, "document_index.json")
+            if os.path.exists(index_path):
+                async with aiofiles.open(index_path, 'r') as f:
+                    content = await f.read()
+                    index_data = json.loads(content)
+                    report["document_counts"]["index"] = {
+                        "count": len(index_data.get("document_ids", [])),
+                        "last_updated": index_data.get("last_updated")
+                    }
+            
+            # Count documents in each directory
+            for name, dir_path in directories.items():
+                if name == "collection":
+                    continue
+                    
+                if os.path.exists(dir_path):
+                    files = [f for f in os.listdir(dir_path) if f.endswith('.json')]
+                    report["document_counts"][name] = len(files)
+            
+            # Check vector index
+            docstore_path = os.path.join(collection_dir, "docstore.json")
+            if os.path.exists(docstore_path):
+                report["vector_index"]["docstore_exists"] = True
+                report["vector_index"]["docstore_size"] = os.path.getsize(docstore_path)
+            else:
+                report["vector_index"]["docstore_exists"] = False
+            
+            # Check if counts match
+            memory_count = len(self._documents)
+            metadata_count = report["document_counts"].get("metadata", 0)
+            
+            report["document_counts"]["in_memory"] = memory_count
+            
+            if memory_count == metadata_count and metadata_count > 0:
+                report["status"] = "healthy"
+            elif metadata_count > 0:
+                report["status"] = "partially_saved"
+            else:
+                report["status"] = "not_saved"
+            
+            logger.info(f"Storage verification complete: {report['status']}")
+            return report
+        except Exception as e:
+            logger.error(f"Error during storage verification: {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a complete document by ID.
         
         Args:
-            documents: List of documents (strings or dictionaries with 'text' field)
+            document_id: The ID of the document to retrieve
+        
+        Returns:
+            Complete document with all metadata components, or None if not found
+        """
+        # First, check in-memory documents
+        for doc in self._documents:
+            if doc.get('id') == document_id:
+                return doc
+        
+        # If not in memory, try to load from files
+        safe_id = re.sub(r'[^\w\-\.]', '_', str(document_id))
+        
+        # Check if metadata file exists
+        metadata_file = os.path.join(self.metadata_dir, f"{safe_id}.json")
+        if not os.path.exists(metadata_file):
+            return None
+        
+        try:
+            # Load core metadata
+            async with aiofiles.open(metadata_file, 'r') as f:
+                content = await f.read()
+                document = json.loads(content)
+            
+            # Load and merge specialized data
+            # 1. Prompts
+            prompt_file = os.path.join(self.prompts_dir, f"{safe_id}.json")
+            if os.path.exists(prompt_file):
+                async with aiofiles.open(prompt_file, 'r') as f:
+                    content = await f.read()
+                    prompts_data = json.loads(content)
+                    for field, value in prompts_data.items():
+                        document['metadata'][field] = value
+            
+            # 2. Patterns
+            pattern_file = os.path.join(self.patterns_dir, f"{safe_id}.json")
+            if os.path.exists(pattern_file):
+                async with aiofiles.open(pattern_file, 'r') as f:
+                    content = await f.read()
+                    patterns_data = json.loads(content)
+                    for field, value in patterns_data.items():
+                        document['metadata'][field] = value
+            
+            # 3. Flows
+            flow_file = os.path.join(self.flows_dir, f"{safe_id}.json")
+            if os.path.exists(flow_file):
+                async with aiofiles.open(flow_file, 'r') as f:
+                    content = await f.read()
+                    flows_data = json.loads(content)
+                    for field, value in flows_data.items():
+                        document['metadata'][field] = value
+            
+            # 4. Graphs
+            graph_file = os.path.join(self.graph_fragments_dir, f"{safe_id}.json")
+            if os.path.exists(graph_file):
+                async with aiofiles.open(graph_file, 'r') as f:
+                    content = await f.read()
+                    graph_data = json.loads(content)
+                    for field, value in graph_data.items():
+                        document['metadata'][field] = value
+            
+            return document
+        except Exception as e:
+            logger.error(f"Error loading document {document_id}: {e}")
+            return None
+
+    async def add_documents(self, documents: List[Any], show_progress: bool = True) -> bool:
+        """
+        Add documents to the vector store with per-document file storage.
+        
+        Args:
+            documents: List of documents to add
             show_progress: Whether to show a progress bar
             
         Returns:
@@ -581,6 +995,7 @@ class SimpleVectorStore:
                     normalized_documents.append(doc)
                 else:
                     logger.warning(f"Invalid document format, skipping: {type(doc)}")
+                    continue
             
             # Create a set of existing document fingerprints for deduplication
             existing_fingerprints = set()
@@ -644,105 +1059,140 @@ class SimpleVectorStore:
                     total=len(docs_to_process),
                     completed=0
                 )
+                
                 for i, doc in enumerate(docs_to_process):
                     try:
                         # Create a unique ID
-                        doc_id = f"{doc.get('metadata', {}).get('id', f'doc_{i}')}_{len(self._documents) + len(docs_to_add)}"
-                        # Create a node
+                        if 'file_path' in doc.get('metadata', {}):
+                            # Use basename for file paths to avoid issues with slashes in IDs
+                            base_name = os.path.basename(doc['metadata']['file_path'])
+                            doc_id = f"{base_name}_{len(self._documents) + len(docs_to_add)}"
+                        elif 'id' in doc.get('metadata', {}):
+                            # Sanitize any existing ID to avoid path issues
+                            doc_id = str(doc['metadata']['id']).replace('/', '_').replace('\\', '_')
+                            doc_id = f"{doc_id}_{len(self._documents) + len(docs_to_add)}"
+                        else:
+                            # Default case when no useful identifier is available
+                            doc_id = f"doc_{i}_{len(self._documents) + len(docs_to_add)}"
+                        
+                        # Log the ID creation for debugging
+                        logger.debug(f"Created document ID: {doc_id} from metadata: {list(doc.get('metadata', {}).keys())}")
+                        
+                        # Create node metadata without prompt-related fields
+                        node_metadata = {}
+                        for k, v in doc.get('metadata', {}).items():
+                            # Skip all prompt-related fields in the vector embeddings
+                            if k not in ['prompt', 'multi_llm_prompts', 'invariant_analysis', 
+                                        'general_flaw_pattern', 'quick_checks', 'api_interactions',
+                                        'call_flow', 'call_flow_graph', 'vulnerable_paths']:
+                                node_metadata[k] = v
+                        
+                        # Create node with cleaned metadata (no prompts)
                         node = TextNode(
                             text=doc['text'],
-                            metadata=doc.get('metadata', {}),
+                            metadata=node_metadata,  # Use cleaned metadata for vector embedding
                             id_=doc_id
                         )
                         
-                        # Add to document tracking
-                        nodes_to_add.append(node)
+                        # Store full metadata in document records for the separate files
                         doc_entry = {
                             'id': doc_id,
-                            'metadata': doc.get('metadata', {}),
+                            'metadata': doc.get('metadata', {}).copy(),  # Keep all metadata here
                             'timestamp': datetime.now().isoformat()
                         }
+                        
+                        # Add to tracking
+                        nodes_to_add.append(node)
                         docs_to_add.append(doc_entry)
                         completed_fingerprints.add(doc['metadata']['fingerprint'])
-                        
-                        # Debugging logs for prompt generation
-                        logger.debug(f"Prompt generation check - generate_prompts: {self.generate_prompts}, has prompt: {'prompt' in doc.get('metadata', {})}")
-                        logger.debug(f"Prompt generator available: {hasattr(self, 'prompt_generator')}")
-                        if hasattr(self, 'prompt_generator'):
-                            logger.debug(f"Prompt generator type: {type(self.prompt_generator)}")
                         
                         # Generate enhanced prompt if needed
                         if self.generate_prompts and 'prompt' not in doc.get('metadata', {}):
                             try:
-                                if hasattr(self, 'prompt_generator'):
-                                    logger.debug(f"Generating prompt for document {i+1}/{len(docs_to_process)}")
-                                    if self.multi_llm_prompts:
-                                        multi_prompts = await self.prompt_generator.generate_multi_llm_prompts(doc)
-                                        
-                                        # Ensure any custom objects are converted to strings for serialization
-                                        sanitized_prompts = {}
-                                        for k, v in multi_prompts.items():
-                                            if isinstance(v, str):
-                                                sanitized_prompts[k] = v
-                                            elif isinstance(v, list):
-                                                sanitized_prompts[k] = [str(item) if not isinstance(item, str) else item for item in v]
-                                            else:
-                                                sanitized_prompts[k] = str(v)
-                                        
-                                        # Update all related objects with the prompt data
-                                        doc['metadata']['multi_llm_prompts'] = sanitized_prompts
-                                        node.metadata['multi_llm_prompts'] = sanitized_prompts
-                                        doc_entry['metadata']['multi_llm_prompts'] = sanitized_prompts
-                                        
-                                        logger.info(f"Added multi-LLM prompts to document {doc_id} ({len(sanitized_prompts)} prompt types)")
-                                    else:
-                                        prompt = await self.prompt_generator.generate_prompt(doc)
-                                        if prompt:
-                                            # Update all related objects with the prompt data
-                                            doc['metadata']['prompt'] = prompt
-                                            node.metadata['prompt'] = prompt
-                                            doc_entry['metadata']['prompt'] = prompt
-                                            logger.info(f"Added prompt to document {doc_id} [{len(prompt)} chars]")
+                                if hasattr(self, 'prompt_generator') and self.prompt_generator is not None:
+                                    logger.info(f"Generating prompt for document {i+1}/{len(docs_to_process)}")
+                                    
+                                    try:
+                                        if self.multi_llm_prompts:
+                                            multi_prompts = await self.prompt_generator.generate_multi_llm_prompts(doc)
+                                            sanitized_prompts = {}
+                                            for k, v in multi_prompts.items():
+                                                if isinstance(v, str):
+                                                    sanitized_prompts[k] = v
+                                                elif isinstance(v, list):
+                                                    sanitized_prompts[k] = [str(item) if not isinstance(item, str) else item for item in v]
+                                                else:
+                                                    sanitized_prompts[k] = str(v)
+                                            
+                                            # Update document metadata but NOT node metadata
+                                            doc['metadata']['multi_llm_prompts'] = sanitized_prompts
+                                            doc_entry['metadata']['multi_llm_prompts'] = sanitized_prompts
+                                            
+                                            logger.info(f"Added multi-LLM prompts to document {doc_id} ({len(sanitized_prompts)} prompt types)")
                                         else:
-                                            logger.warning(f"Generated empty prompt for document {doc_id}")
+                                            # Generate a basic prompt with a timeout
+                                            try:
+                                                prompt = await asyncio.wait_for(
+                                                    self.prompt_generator.generate_prompt(doc), 
+                                                    timeout=self.prompt_timeout  # Use the timeout from config
+                                                )
+                                                if prompt:
+                                                    # Log success and prompt length
+                                                    logger.info(f"Successfully generated prompt for doc {doc_id}: {len(prompt)} chars")
+                                                    
+                                                    # Only update document and doc_entry metadata, not node metadata
+                                                    doc['metadata']['prompt'] = prompt
+                                                    doc_entry['metadata']['prompt'] = prompt
+                                                else:
+                                                    logger.warning(f"Generated empty prompt for document {doc_id}")
+                                            except asyncio.TimeoutError:
+                                                logger.warning(f"Prompt generation timed out after {self.prompt_timeout}s for document {doc_id}")
+                                                # Add a simple fallback prompt
+                                                doc['metadata']['prompt'] = f"Document {doc_id} - fallback prompt"
+                                                doc_entry['metadata']['prompt'] = doc['metadata']['prompt']
+                                    except Exception as e_prompt:
+                                        logger.error(f"Error in prompt generation for document {doc_id}: {e_prompt}")
+                                        import traceback
+                                        logger.error(f"Prompt generation traceback: {traceback.format_exc()}")
+                                else:
+                                    logger.warning(f"No prompt_generator available for document {doc_id}")
                             except Exception as e:
-                                logger.error(f"Error generating prompt for document {i}: {e}")
+                                logger.error(f"Error in prompt generation section: {e}")
                         
-                        # Save checkpoint every 10 documents
-                        if (i + 1) % 10 == 0:
+                        # Save each document to its individual files immediately
+                        await self._save_individual_document(doc_entry)
+                        
+                        # Save checkpoint periodically
+                        if (i + 1) % 5 == 0:
                             await self._save_checkpoint(checkpoint_path, {
                                 'completed_fingerprints': list(completed_fingerprints),
                                 'pending_nodes': nodes_to_add,
                                 'pending_docs': docs_to_add
                             })
+                            
                             progress.update(task, description=f"[cyan]Checkpoint saved ({i+1}/{len(docs_to_process)})")
                         
-                        # Update progress
                         progress.update(task, advance=1, description=f"[green]Processing document {i+1}/{len(docs_to_process)}")
                     except Exception as e:
                         logger.error(f"Error processing document {i}: {e}")
+                        progress.update(task, advance=1, description=f"[red]Error with document {i+1}/{len(docs_to_process)}")
                         continue
-            
-            # Final checkpoint before index insertion
-            await self._save_checkpoint(checkpoint_path, {
-                'completed_fingerprints': list(completed_fingerprints),
-                'pending_nodes': nodes_to_add,
-                'pending_docs': docs_to_add
-            })
-            
-            # Add nodes to index
-            if nodes_to_add:
-                logger.info(f"Inserting {len(nodes_to_add)} nodes into vector index...")
-                self._index.insert_nodes(nodes_to_add)
-            
-                # Update document list
-                self._documents.extend(docs_to_add)
                 
-                # Save index and metadata
+                # Add nodes to index
+                if nodes_to_add:
+                    logger.info(f"Inserting {len(nodes_to_add)} nodes into vector index...")
+                    self._index.insert_nodes(nodes_to_add)
+                    
+                    # Update document list
+                    self._documents.extend(docs_to_add)
+                
+                # Save index and document index
                 index_dir = os.path.join(self.storage_dir, self.collection_name)
                 logger.info("Saving index to disk...")
                 self._index.storage_context.persist(persist_dir=index_dir)
-                await self._save_document_metadata(index_dir)
+                
+                # Update document index file
+                await self._update_document_index()
                 
                 # Remove checkpoint after successful completion
                 if os.path.exists(checkpoint_path):
@@ -753,4 +1203,121 @@ class SimpleVectorStore:
             return True
         except Exception as e:
             logger.error(f"Error adding documents to vector store: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    async def _save_individual_document(self, doc: Dict[str, Any]) -> bool:
+        """
+        Save a single document to its individual files.
+        
+        Args:
+            doc: Document to save
+            
+        Returns:
+            Success status
+        """
+        try:
+            import aiofiles
+            import json
+            
+            doc_id = doc.get('id')
+            if not doc_id:
+                logger.warning("Cannot save document without ID")
+                return False
+            
+            # Create a sanitized filename from the document ID
+            safe_id = re.sub(r'[^\w\-\.]', '_', str(doc_id))
+            
+            # Extract document components
+            metadata = doc.get('metadata', {}).copy()
+            
+            # 1. Extract specialized data
+            prompts_data = {}
+            for field in ['prompt', 'multi_llm_prompts', 'invariant_analysis', 'general_flaw_pattern']:
+                if field in metadata:
+                    prompts_data[field] = metadata.pop(field)
+            
+            patterns_data = {}
+            for field in ['quick_checks', 'api_interactions', 'cognitive_biases', 'counterfactuals']:
+                if field in metadata:
+                    patterns_data[field] = metadata.pop(field)
+            
+            flows_data = {}
+            for field in ['call_flow', 'call_flow_graph', 'vulnerable_paths', 'entry_points']:
+                if field in metadata:
+                    flows_data[field] = metadata.pop(field)
+            
+            graph_data = {}
+            for field in list(metadata.keys()):
+                if field.startswith('graph_'):
+                    graph_data[field] = metadata.pop(field)
+            
+            # 2. Save core metadata (without specialized fields)
+            metadata_file = os.path.join(self.metadata_dir, f"{safe_id}.json")
+            core_doc = {
+                'id': doc_id,
+                'metadata': metadata,
+                'timestamp': doc.get('timestamp', datetime.now().isoformat())
+            }
+            async with aiofiles.open(metadata_file, 'w') as f:
+                await f.write(json.dumps(core_doc, default=lambda x: str(x) if not isinstance(x, (dict, list, str, int, float, bool, type(None))) else x))
+            
+            # 3. Save prompt data if exists
+            if prompts_data:
+                prompt_file = os.path.join(self.prompts_dir, f"{safe_id}.json")
+                async with aiofiles.open(prompt_file, 'w') as f:
+                    await f.write(json.dumps(prompts_data, default=lambda x: str(x) if not isinstance(x, (dict, list, str, int, float, bool, type(None))) else x))
+            
+            # 4. Save patterns data if exists
+            if patterns_data:
+                pattern_file = os.path.join(self.patterns_dir, f"{safe_id}.json")
+                async with aiofiles.open(pattern_file, 'w') as f:
+                    await f.write(json.dumps(patterns_data, default=lambda x: str(x) if not isinstance(x, (dict, list, str, int, float, bool, type(None))) else x))
+            
+            # 5. Save flows data if exists
+            if flows_data:
+                flow_file = os.path.join(self.flows_dir, f"{safe_id}.json")
+                async with aiofiles.open(flow_file, 'w') as f:
+                    await f.write(json.dumps(flows_data, default=lambda x: str(x) if not isinstance(x, (dict, list, str, int, float, bool, type(None))) else x))
+            
+            # 6. Save graph data if exists
+            if graph_data:
+                graph_file = os.path.join(self.graph_fragments_dir, f"{safe_id}.json")
+                async with aiofiles.open(graph_file, 'w') as f:
+                    await f.write(json.dumps(graph_data, default=lambda x: str(x) if not isinstance(x, (dict, list, str, int, float, bool, type(None))) else x))
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error saving individual document {doc.get('id', 'unknown')}: {e}")
+            return False
+
+    async def _update_document_index(self) -> bool:
+        """
+        Update the document index file with current document IDs.
+        
+        Returns:
+            Success status
+        """
+        try:
+            import aiofiles
+            import json
+            
+            # Create a document index for lookup
+            document_index = {
+                "document_ids": [doc.get('id') for doc in self._documents if doc.get('id')],
+                "last_updated": datetime.now().isoformat(),
+                "total_count": len(self._documents)
+            }
+            
+            # Save the index file
+            index_dir = os.path.join(self.storage_dir, self.collection_name)
+            index_file_path = os.path.join(index_dir, "document_index.json")
+            async with aiofiles.open(index_file_path, 'w') as f:
+                await f.write(json.dumps(document_index))
+            
+            logger.info(f"Updated document index with {len(document_index['document_ids'])} documents")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating document index: {e}")
             return False

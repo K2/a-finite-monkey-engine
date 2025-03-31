@@ -1,0 +1,13 @@
+
+            Analyze this code and generate a comprehensive prompt for an LLM to understand it:
+            
+            ```
+            {text}
+            ```
+            
+            Your prompt should:
+            1. Identify the language, libraries, and frameworks used
+            2. Explain the core functionality and purpose
+            3. Highlight key algorithmic patterns and design choices
+            4. Note any potential issues, optimizations, or security concerns
+            

@@ -1,0 +1,11 @@
+
+            Analyze this security-related content and create a detailed prompt to guide an LLM:
+            
+            {text}
+            
+            Your prompt should:
+            1. Identify the type of security issue or vulnerability
+            2. Explain the technical details of how it works
+            3. Describe potential impact and attack vectors
+            4. Note detection and mitigation strategies
+            
