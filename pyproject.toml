@@ -24,7 +24,6 @@ dependencies = [
     "ghapi>=0.1.19",
     "loguru>=0.7.0",
     "llama-cpp-python>=0.2.0",
-    "llama-index>=0.10.0",
     "httpx>=0.27.0",
     "SQLAlchemy>=2.0.25",
     "asyncpg>=0.29.0",
@@ -44,6 +43,7 @@ dependencies = [
     "pydantic>=2.5.2",
     "griffe>=1.6.0",
     "pydantic-settings>=2.8.1",
+    "openzeppelin-solidity-grammar-parser>=0.0.5",
     "aiofiles>=24.1.0",
     "yappi>=1.6.10",
     "ollama>=0.4.7",
@@ -54,18 +54,14 @@ dependencies = [
     "typer>=0.15.2",
     "matplotlib>=3.10.1",
     "llama-index-program-guidance>=0.3.0",
-    "antlr4-python3-runtime",
-    "openzeppelin-solidity-grammar-parser",
+    "llama-index>=0.12.26",
+    "aiohttp>=3.11.14",
     "llama-index-question-gen-guidance>=0.3.0",
-    "llama-index-question-gen-openai>=0.3.0",
-    "guidance>=0.1.16",
-    "llama-index-llms-openai>=0.3.25",
-    "llama-index-program-openai>=0.3.1",
-    "openai>=1.68.2",
-    "pytest>=8.3.5",
     "pytest-asyncio>=0.26.0",
-    "aiohttp>=3.8.0",
-    "rich>=13.0.0",
+    "torchvision>=0.21.0",
+    "torchaudio>=2.6.0",
+    "intel-extension-for-pytorch>=2.6.0",
+    "llama-index-embeddings-ollama>=0.6.0",
 ]
 
 [project.optional-dependencies]
@@ -84,13 +80,13 @@ dev = [
 [tool.finite-monkey-engine]
 # Default configuration values
 output = "reports"
-# DEFAULT_MODEL = "hf.co/lmstudio-community/OlympicCoder-7B-GGUF:Q8_0"
-# SCAN_MODEL = "hf.co/lmstudio-community/OlympicCoder-7B-GGUF:Q8_0"
-# CONFIRMATION_MODEL = "hf.co/lmstudio-community/OlympicCoder-7B-GGUF:Q8_0"
-# WORKFLOW_MODEL = "hf.co/lmstudio-community/OlympicCoder-7B-GGUF:Q8_0"
-# QUERY_MODEL = "hf.co/lmstudio-community/OlympicCoder-7B-GGUF:Q8_0"
+DEFAULT_MODEL = "hf.co/lmstudio-community/OlympicCoder-7B-GGUF:Q8_0"
+SCAN_MODEL = "hf.co/lmstudio-community/OlympicCoder-7B-GGUF:Q8_0"
+CONFIRMATION_MODEL = "hf.co/lmstudio-community/OlympicCoder-7B-GGUF:Q8_0"
+WORKFLOW_MODEL = "hf.co/lmstudio-community/OlympicCoder-7B-GGUF:Q8_0"
+QUERY_MODEL = "hf.co/lmstudio-community/OlympicCoder-7B-GGUF:Q8_0"
 MAX_THREADS_OF_SCAN = 4
-REQUEST_TIMEOUT = 900.0
+REQUEST_TIMEOUT = 300.0
 MAX_RETRIES = 5
 
 
@@ -101,7 +97,7 @@ finite-monkey-web = "finite_monkey.web.app:run_server"
 
 [tool.black]
 line-length = 88
-target-version = "py311"
+target-version = ["py311"]
 
 [tool.isort]
 profile = "black"
@@ -129,14 +125,5 @@ warn_unreachable = true
 [tool.uv]
 # You can specify resolution strategies, version constraints, etc.
 build-backend = "setuptools.build_meta"
-
-[tool.uv.sources]
-antlr4-python3-runtime = { path = "prebuilt/antlr4_python3_runtime-4.13.2.tar.gz" }
-openzeppelin-solidity-grammar-parser = { path = "prebuilt/openzeppelin_solidity_grammar_parser-0.0.5.tar.gz" }
-# requires = ["setuptools>=42", "wheel"]
-
-[tool.poetry.dependencies]
-guidance = "^0.1.0"
-llama-index-question-gen-guidance = "^0.1.0"
-llama-index-llms = "^0.1.0"
+#requires = ["setuptools>=42", "wheel"]
 

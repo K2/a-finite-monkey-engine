@@ -125,7 +125,24 @@ class IPEXEmbedding(BaseEmbedding):
         use_fp16: bool = False,
         **kwargs
     ):
-        # ...
+        # Determine data type based on fp16 flag
+        dtype = torch.float16 if use_fp16 else torch.float32
+        # Initialize device type
+        self.device_type = device
+        # Initialize model
+        self.model = self._load_model(model_name, dtype)
+        # Additional initialization
+        super().__init__(**kwargs)
+
+    def _load_model(self, model_name, dtype):
+        # Load the model with the specified dtype
+        return torch.hub.load('intel_extension_for_pytorch', model_name, dtype=dtype)
+
+    def embed(self, input_data):
+        # Validate and convert input data to tensor
+        if not isinstance(input_data, torch.Tensor):
+            input_data = torch.tensor(input_data, dtype=self.model.dtype)
+        return self.model(input_data)
 ```
 
 This class:
@@ -162,6 +179,48 @@ pip install intel-extension-for-pytorch
 # For GPU (XPU) support
 pip install torch torchvision torchaudio intel-extension-for-pytorch --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
 ```
+
+# IPEX Embedding Model Integration
+
+## Issue Fixed
+
+The error `'SimpleVectorStore' object has no attribute '_create_ipex_embedding_model'` indicated that the method for creating IPEX embedding models was missing from the `SimpleVectorStore` class, despite being referenced in the initialization code.
+
+## Implementation Details
+
+The added `_create_ipex_embedding_model` method:
+
+1. Dynamically checks if the `IPEXEmbedding` class is already defined in the global scope
+2. If not found, defines a complete implementation inline
+3. Properly configures the embedding model with Intel optimizations when available
+4. Provides graceful fallbacks for error conditions
+
+### Intel IPEX Optimization
+
+The embedding model leverages Intel's PyTorch extensions (IPEX) to optimize performance:
+
+- On CPU: Uses IPEX CPU optimizations with auto kernel selection
+- On XPU (Intel GPU): Moves the model to XPU and applies IPEX optimizations
+- Supports both FP32 and FP16 precision modes
+
+### Async Compatibility
+
+The implementation maintains proper async/sync interfaces:
+
+- Synchronous methods: `_get_text_embedding`, `_get_query_embedding`
+- Asynchronous methods: `_aget_text_embedding`, `_aget_query_embedding` 
+
+Async methods wrap their synchronous counterparts in executors to avoid blocking.
+
+## Testing
+
+To test this implementation:
+
+1. Ensure IPEX is installed: `pip install intel-extension-for-pytorch`
+2. For XPU support, install Intel GPU drivers and `intel-extension-for-pytorch-xpu`
+3. Run `build_vector_store.py` with `--embedding-model ipex`
+
+This fix ensures that the `SimpleVectorStore` can properly leverage Intel hardware acceleration when available.
 
 # Vector Store Utility - Prompt Generation
 
@@ -311,9 +370,12 @@ Each document gets a unique fingerprint based on its content and key metadata:
 
 ```python
 def _create_document_fingerprint(self, document: Dict[str, Any]) -> str:
-    # Extract key content for fingerprinting
-    text = document.get('text', '')
-    metadata = document.get('metadata', {})
+    if isinstance(document, str):
+        text = document
+        metadata = {}
+    else:
+        text = document.get('text', '')
+        metadata = document.get('metadata', {})
     
     # Include important metadata fields in the fingerprint
     key_metadata = []
@@ -326,6 +388,7 @@ def _create_document_fingerprint(self, document: Dict[str, Any]) -> str:
     
     # Create SHA-256 hash
     fingerprint = hashlib.sha256(fingerprint_content.encode('utf-8')).hexdigest()
+    return fingerprint
 ```
 
 ## Benefits of Deduplication
@@ -573,27 +636,6 @@ This multi-strategy approach ensures effective code extraction from various docu
 
 A testing utility `test_code_extraction()` was also added to validate extraction results during development and debugging.
 
-## Code Structure Fix
-
-Fixed a serious syntax error in the `vector_store_util.py` file where methods were defined in reverse order with unmatched braces. The jumbled code included:
-
-1. `test_code_extraction` method
-2. `display_statistics` method 
-3. `query` method
-
-Issues fixed:
-- Properly structured method definitions
-- Fixed indentation levels
-- Ensured matching braces
-- Restored proper logical order of code
-
-This type of error can occur when:
-- Multiple code fragments are concatenated incorrectly
-- Code is accidentally pasted in reverse order
-- Editor malfunction during saving
-
-Always be cautious when editing large files with many methods, as syntax errors can be difficult to spot visually but will prevent the entire file from executing.
-
 # Generalized Security Prompt Generation
 
 ## Security-Focused Prompts
@@ -636,4 +678,712 @@ These prompts can be used in two ways:
 Documents containing security-critical keywords (contract, token, balance, etc.) are automatically tagged with `security_critical: true` in their metadata, enabling filtered queries for high-risk code.
 
 This enhancement helps identify dangerous coding patterns that might not be explicitly reported as issues but could still represent risks to asset security.
+
+# Vector Store Crash Recovery
+
+## State Restoration Process
+
+The vector store utility has undergone significant restoration after a system crash that corrupted several critical methods. The following components have been reconstructed:
+
+1. **Core Document Processing Logic**
+   - The `add_documents` method was severely jumbled with mixed code fragments
+   - Fully restored with proper checkpointing and progress tracking
+   - Preserved the deduplication logic to avoid document repetition
+
+2. **Checkpoint Handling**
+   - Fixed `_save_checkpoint` and `_load_checkpoint` methods
+   - These are essential for resuming processing after interruptions
+
+3. **Prompt Generation**
+   - Rebuilt `_generate_prompt_from_metadata` with proper code analysis focus
+   - Added missing `_generate_prompt_from_metadata_multi_llm` implementation
+   - Ensured proper error handling with fallbacks to rule-based generation
+
+4. **Recovery Mechanisms**
+   - Added `check_and_repair_checkpoint` to verify and fix checkpoint files
+   - Implemented `recover_from_crash` for comprehensive system recovery
+
+## Usage After Crash
+
+To recover the vector store after a crash:
+
+```python
+# Initialize the vector store
+vector_store = SimpleVectorStore(
+    storage_dir="/path/to/store",
+    collection_name="your_collection"
+)
+
+# Run the recovery process
+success, message = vector_store.recover_from_crash()
+if success:
+    logger.info(f"Recovery successful: {message}")
+    # You can now continue with normal operations
+else:
+    logger.error(f"Recovery failed: {message}")
+    # Take more drastic recovery measures or rebuild the index
+```
+
+## Prevention Measures
+
+To avoid similar issues in the future:
+1. Run periodic integrity checks on checkpoint files
+2. Implement a backup mechanism for critical data structures
+3. Consider using atomic file operations for checkpoint saving
+4. Add periodic full dumps of the document metadata for easier restoration
+
+# Vector Store Document Management
+
+## Added Missing `add_documents` Method
+
+The core functionality for adding documents to the vector store has been restored. This method:
+
+1. **Deduplicates Documents**: Uses SHA-256 fingerprinting of content and key metadata
+2. **Provides Resumability**: Implements checkpoint/resume capability for interrupted operations
+3. **Visualizes Progress**: Shows real-time progress with rich progress bars
+4. **Generates Prompts**: Optionally adds analysis prompts to document metadata
+
+## Document Fingerprinting
+
+Documents are fingerprinted using a combination of content and metadata:
+```python
+fingerprint_content = text + '|'.join(key_metadata)
+fingerprint = hashlib.sha256(fingerprint_content.encode('utf-8')).hexdigest()
+```
+
+This ensures the same document isn't added multiple times, even if it appears in different data sources.
+
+## Checkpoint System
+
+The checkpoint system saves progress every 10 documents and provides automatic recovery:
+```python
+self._save_checkpoint(checkpoint_path, {
+    'completed_fingerprints': list(completed_fingerprints),
+    'pending_nodes': nodes_to_add,
+    'pending_docs': docs_to_add
+})
+```
+
+After successful completion, the checkpoint file is automatically removed to maintain a clean state.
+
+## Usage Example
+
+```python
+# Prepare documents
+documents = [
+    {"text": "Document content", "metadata": {"title": "Doc 1", "source": "github"}},
+    # ...more documents
+]
+
+# Add to vector store with progress visualization
+success = await vector_store.add_documents(documents)
+```
+
+This implementation ensures robustness when processing large document collections.
+
+# Vector Store Recovery and Functionality
+
+## Core Methods Added/Fixed
+
+The following essential methods have been restored or added to ensure the vector store functions properly:
+
+1. `add_documents` - The primary function for adding documents to the vector store
+2. `_create_document_fingerprint` - Generates unique document fingerprints for deduplication
+3. `_save_checkpoint` and `_load_checkpoint` - Manage checkpoint state for resuming operations
+4. `query` - Enables querying the vector store for similar documents
+5. `recover_from_crash` and `check_and_repair_checkpoint` - Recovery utilities for handling crashes
+
+## VS Code Corruption Handling
+
+The file previously showed signs of VS Code corruption with jumbled code and broken syntax:
+- Mixed-up indentation and line ordering
+- Mismatched brackets and delimiters
+- Incomplete method definitions
+
+These issues have been fixed by providing complete, properly formatted implementations of the essential methods.
+
+## Usage After Restoration
+
+Now that the basic functionality is restored, you can:
+
+1. **Process Documents**: 
+   ```python
+   await vector_store.add_documents(documents)
+   ```
+
+2. **Recover from Crashes**:
+   ```python
+   success, message = vector_store.recover_from_crash()
+   ```
+
+3. **Query the Store**:
+   ```python
+   results = await vector_store.query("Example query", top_k=5)
+   ```
+
+The checkpoint system automatically handles resuming interrupted operations.
+
+# Async I/O Improvements
+
+The vector store utility has been enhanced with proper asynchronous I/O for both network and disk operations:
+
+## Async File Operations
+
+File operations have been converted to use `aiofiles` for non-blocking I/O:
+
+1. **Checkpoint Management**:
+   - `_save_checkpoint` and `_load_checkpoint` now use async file operations
+   - This prevents the event loop from blocking during serialization/deserialization of large checkpoint files
+
+2. **Document Metadata**:
+   - `_save_document_metadata` now uses async file operations
+   - Large document collections can be saved without blocking the main event loop
+
+## Requirements
+
+The async file operations require the `aiofiles` package, which should be added to the project dependencies:
+```
+aiofiles
+```
+
+# Vector Store Initialization and Embedding Models
+
+## Missing `_initialize_index` Method
+
+The error `'SimpleVectorStore' object has no attribute '_initialize_index'` was occurring because:
+
+1. The `_initialize_index` method was referenced in `__init__` but wasn't properly defined
+2. The initialization sequence calls this method to set up the vector index 
+
+The implemented method handles:
+- Loading an existing vector index from disk if available
+- Creating a new vector index if none exists
+- Setting up the embedding model based on configuration
+- Proper error handling for initialization failures
+
+## Embedding Model Architecture
+
+The vector store supports three embedding model types:
+
+1. **IPEX**: Intel optimized embedding models for CPU/XPU acceleration
+2. **Ollama**: Local API-based embedding models using Ollama server
+3. **HuggingFace**: Direct HuggingFace models loaded locally
+
+The initialization sequence chooses the embedding model based on the `embedding_model` parameter:
+```python
+if self.embedding_model == "ipex":
+    embed_model = self._create_ipex_embedding_model()
+elif self.embedding_model == "ollama":
+    embed_model = self._create_ollama_embedding_model()
+else:
+    embed_model = self._create_local_embedding_model()
+```
+
+This architecture offers flexibility for different deployment environments and hardware capabilities.
+
+## Dependencies
+
+The initialization relies on:
+- llama_index.core components for vector indexing
+- Access to embedding models (either directly or via API)
+- File system access for index persistence
+
+If you encounter initialization errors, check:
+1. LlamaIndex installation is complete
+2. Selected embedding model dependencies are installed
+3. Storage directory has proper permissions
+
+# Vector Store Corruption Repair
+
+## Critical Missing Methods Fixed
+
+The `SimpleVectorStore` class had several missing or corrupted methods which have been fixed:
+
+1. **_initialize_index**: This critical method was completely missing, causing initialization failures.
+   The method handles:
+   - Loading existing indexes or creating new ones
+   - Setting up appropriate embedding models based on configuration
+   - Managing document metadata
+
+2. **Embedding Model Creation**: The following methods were corrupted or incomplete:
+   - `_create_ipex_embedding_model`: Intel optimized embedding support
+   - `_create_local_embedding_model`: HuggingFace embedding support
+   - `_create_ollama_embedding_model`: Ollama API-based embeddings
+
+3. **Async Methods**: Several async methods were corrupt or implemented incorrectly:
+   - Fixed proper async I/O implementations with aiofiles
+   - Enhanced Ollama embedding model with true async capabilities
+   - Fixed code extraction functionality
+
+## Test Strategy
+
+To verify these fixes, execute the following steps:
+
+1. **Initialization Test**: 
+   ```python
+   store = SimpleVectorStore(collection_name="test_repair")
+   print(f"Initialized successfully: {store._index is not None}")
+   ```
+
+2. **Async Method Verification**:
+   ```python
+   import asyncio
+   
+   async def test_async_methods():
+       store = SimpleVectorStore(collection_name="test_repair")
+       checkpoint = {'test': 'data'}
+       checkpoint_path = os.path.join(store.storage_dir, "test_checkpoint.pkl")
+       success = await store._save_checkpoint(checkpoint_path, checkpoint)
+       loaded = await store._load_checkpoint(checkpoint_path)
+       print(f"Checkpoint test passed: {loaded['test'] == 'data'}")
+   
+   asyncio.run(test_async_methods())
+   ```
+
+These fixes ensure the vector store component functions correctly and can properly initialize and manage embeddings.
+
+# Document Processing Format Fix
+
+## Issue: Invalid Document Format Error
+
+The error `ValidationError` for `MediaResource` with `input_type=dict` indicated that the `add_documents` method was incorrectly handling input document format:
+
+1. **Expected**: List of dictionaries with 'text' fields
+2. **Interpreted as**: List of raw text strings
+
+## Fixed Implementation
+
+The updated `add_documents` method now:
+
+1. Properly validates input document formats
+2. Handles dictionary input with 'text' field
+3. Uses correct TextNode creation 
+4. Maintains proper async/await patterns
+
+This should fix both:
+- The `Input should be a valid string` error
+- The `NoneType can't be used in 'await' expression` error
+
+## Testing
+
+You can now use the method with dictionary-style documents:
+
+```python
+documents = [
+    {"text": "Document content", "metadata": {"source": "file1.txt"}},
+    {"text": "Another document", "metadata": {"source": "file2.txt"}}
+]
+await vector_store.add_documents(documents)
+```
+
+The method will:
+1. Validate each document has a 'text' field
+2. Extract text and metadata appropriately
+3. Create proper TextNode objects
+4. Properly use async/await for all async operations
+
+# Document Fingerprinting Implementation
+
+## Missing Method: `_create_document_fingerprint`
+
+The error "SimpleVectorStore object has no attribute '_create_document_fingerprint'" occurred because the document fingerprinting method was missing but referenced in the `add_documents` method. This method is essential for:
+
+1. **Document Deduplication**: Creating unique fingerprints to identify duplicate documents
+2. **Checkpoint Processing**: Tracking which documents have been processed during resumable operations
+
+## Implementation Details
+
+The implemented fingerprinting method uses:
+
+1. **Content-based hashing**: Primarily based on document text
+2. **Metadata incorporation**: Key metadata fields are included to differentiate documents with identical text but different sources
+3. **SHA-256 algorithm**: Provides a secure, collision-resistant hash suitable for large document collections
+
+## Testing Approach
+
+When testing the fingerprinting functionality, verify:
+
+1. **Determinism**: Same input always produces same fingerprint
+2. **Sensitivity**: Different documents produce different fingerprints
+3. **Metadata awareness**: Documents with identical text but different metadata produce different fingerprints
+
+This fingerprinting approach provides robust document identification while enabling efficient deduplication in large document collections.
+
+# Prompt Generation for Document Analysis
+
+## Missing Methods Implementation
+
+The error "'SimpleVectorStore' object has no attribute '_generate_prompt_from_metadata'" occurred because several critical prompt generation methods were missing:
+
+1. `_generate_prompt_from_metadata`: Core prompt generation for single LLM analysis
+2. `_generate_prompt_from_metadata_multi_llm`: Extended prompt generation for multiple LLMs
+3. `_generate_security_prompts`: Security-focused prompts for vulnerability detection
+4. `_extract_code_segments`: Helper to extract code blocks from document text
+5. `_call_ollama_completion`: Async interface to Ollama LLM API
+
+## Technical Implementation Details
+
+The prompt generation system follows a tiered approach:
+
+1. **Ollama-based Generation (Preferred)**: 
+   - Uses an LLM to dynamically create analysis prompts
+   - System and user messages guide the LLM to create effective prompts
+   - Focuses on code analysis without revealing known issues
+
+2. **Rule-based Fallback**:
+   - Category-based templating when Ollama is unavailable
+   - Adjusts focus based on issue category (security, performance, logic)
+
+3. **Multi-LLM Specialization**:
+   - Creates specialized prompts for different analysis angles
+   - Includes general, security, code quality, and optimization perspectives
+   - Adapts to document metadata for domain-specific analysis
+
+## Usage Notes
+
+These methods are automatically called by `add_documents` when:
+1. `self.generate_prompts` is enabled 
+2. The document metadata doesn't already contain a 'prompt' field
+
+The generated prompts are stored in document metadata for future use by analysis workflows.
+
+## Testing
+
+To test these methods, you can run:
+
+```python
+async def test_prompt_generation():
+    """Test prompt generation functionality."""
+    store = SimpleVectorStore()
+    
+    # Test document with code content
+    doc = {
+        "text": "```\nfunction transfer(address to, uint256 amount) {\n  balances[msg.sender] -= amount;\n  balances[to] += amount;\n}\n```",
+        "metadata": {"title": "Simple Transfer Function", "category": "security"}
+    }
+    
+    # Generate prompt
+    prompt = await store._generate_prompt_from_metadata(doc)
+    print(f"Generated prompt: {prompt}")
+    
+    # Generate multi-LLM prompts
+    multi_prompts = await store._generate_prompt_from_metadata_multi_llm(doc)
+    for llm_type, prompt in multi_prompts.items():
+        print(f"Prompt for {llm_type}: {prompt}")
+    
+    return True
+```
+
+# Code Corruption Recovery
+
+This file details the recovery of corrupted methods in the vector store utility.
+
+## Corruption Pattern
+
+The vector store utility suffered from several types of corruption:
+
+1. **Method Fragmentation**: Methods were broken up with parts scattered through the file
+2. **Incomplete Method Bodies**: Some methods had incomplete implementations
+3. **Indent Disruption**: Indentation was inconsistent, breaking Python's structure
+4. **Token Interference**: Opening/closing brackets, quotes and parentheses were mismatched
+
+## Recovered Methods
+
+The following methods were reconstructed to restore full functionality:
+
+1. `_generate_prompt_from_metadata`: Creates LLM prompts for code analysis
+2. `_call_ollama_completion`: Interface to Ollama API for LLM completions
+3. `_generate_security_prompts`: Creates security-focused analysis prompts
+4. `_generate_prompt_from_metadata_multi_llm`: Creates specialized prompts for different LLMs
+5. `_extract_code_segments`: Utility to extract code blocks from text
+
+## Testing Strategy
+
+To verify the recovery is complete:
+
+1. Run a test that exercises each method
+2. Test prompt generation with a sample document
+3. Verify Ollama API calls (if available)
+4. Check successful document addition with prompts enabled
+
+## Design Notes
+
+The prompt generation system uses a tiered approach:
+- Primary: Ollama-based dynamic prompt creation
+- Fallback: Rule-based templating when LLM is unavailable
+- Multi-perspective: Different prompts for focused analysis types
+
+This design ensures robust code analysis regardless of environment limitations.
+
+# Document Processing Issues and Fixes
+
+## Problem Analysis: Documents Not Processing
+
+The system was attempting to add 6864 documents but immediately reported "No new documents to add (skipped 0 duplicates)" without processing them, preventing prompt generation from running.
+
+### Root Causes:
+
+1. **Commented-out Fingerprinting Logic**: The code to generate document fingerprints and populate the `new_documents` list was disabled with comments
+2. **Document Format Handling**: The system wasn't correctly handling different input document formats (strings vs dictionaries)
+3. **Missing Fingerprint Implementation**: The fingerprinting logic wasn't properly implemented
+
+## Implementation Fixes:
+
+1. **Document Format Normalization**:
+   ```python
+   # Handle string documents if provided
+   if documents and isinstance(documents[0], str):
+       documents = [{"text": doc} for doc in documents]
+   ```
+
+2. **Document Fingerprinting**:
+   - Restored and fixed the fingerprinting logic
+   - Implemented robust `_create_document_fingerprint` method
+   - Added better logging around document processing
+
+3. **Import Path Fix**:
+   - Changed relative import `.vector_store_prompts` to absolute import `vector_store_prompts`
+
+## Testing Approach:
+
+The `test_document_processing.py` script validates:
+- Document processing and fingerprinting
+- Duplicate detection 
+- Prompt generation (indirectly)
+
+## Expected Behavior:
+
+When processing documents, the system should now:
+1. Correctly identify and skip duplicates
+2. Process all new documents
+3. Generate appropriate prompts for each document
+4. Log the document processing status accurately
+
+If you continue to see issues, examine the document format being provided to `add_documents` and check if fingerprinting is working as expected.
+
+# Vector Store Utility API Notes
+
+## Missing Methods Implementation
+
+The `SimpleVectorStore` class was missing several critical methods:
+
+1.  `_generate_prompt_from_metadata`: Core prompt generation for single LLM analysis
+2.  `_generate_prompt_from_metadata_multi_llm`: Extended prompt generation for multiple LLMs
+3.  `_generate_security_prompts`: Security-focused prompts for vulnerability detection
+4.  `_extract_code_segments`: Helper to extract code blocks from document text
+5.  `_call_ollama_completion`: Async interface to Ollama LLM API
+
+These methods have been implemented to restore full functionality.
+
+## Testing
+
+These methods are now indirectly tested through the `add_documents` method.
+
+# Progress Bar and Add Documents Method Fix
+
+## Issues Fixed
+
+1. **Progress Initialization Error**: 
+   ```
+   Error searching vector store: 'list' object has no attribute 'get_table_column'
+   ```
+   The `Progress` constructor was incorrectly being passed a list of columns instead of receiving them as direct arguments.
+
+2. **Method Corruption**: The end of the `add_documents` method was corrupted and mixed with code from the `search` method, creating an incorrect return value and preventing proper document addition.
+
+## Implementation Details
+
+1. **Progress Bar Fix**: 
+   - Removed the list wrapper around the column arguments
+   - Ensured proper progress updates throughout the document processing
+
+2. **Document Addition Completion**:
+   - Restored the correct ending to the method
+   - Implemented proper index updates and persistence
+   - Added checkpoint cleanup on successful completion
+
+## Testing
+
+The fix can be verified by running the document addition again. A successful run should:
+1. Show progress updates during document processing
+2. Complete with a success message
+3. Return `True` from the method
+4. Result in documents being properly added to the vector store
+
+This is a critical fix as it enables the main functionality of the vector store - adding documents with proper progress tracking and checkpoint handling.
+
+# Prompt Generation Fix
+
+## Issue: Missing Prompt Generation
+
+The logs showed that while documents were being added to the vector store, no prompts were being generated despite the `generate_prompts` setting being enabled. This is a critical feature as these prompts are used to guide LLMs in analyzing the code for potential issues.
+
+## Root Cause
+
+The `SimpleVectorStore` class wasn't initializing the `prompt_generator` object, so the condition in `add_documents` was checking for an attribute that didn't exist:
+
+```python
+if hasattr(self, 'prompt_generator'):
+    # This condition was never True because prompt_generator wasn't initialized
+```
+
+## Implementation Details
+
+The fix adds initialization of the `PromptGenerator` in the `SimpleVectorStore` constructor:
+
+1. Imports the `PromptGenerator` class from `vector_store_prompts` module
+2. Creates an instance with the appropriate configuration settings
+3. Handles the potential `ImportError` gracefully by falling back to legacy prompt generation
+4. Sets `self.prompt_generator = None` if prompt generation is disabled
+
+## Testing
+
+A standalone test script (`test_prompt_generation.py`) is provided to verify that:
+
+1. The `PromptGenerator` can directly generate prompts
+2. The `SimpleVectorStore` properly initializes the prompt generator
+3. Documents processed through `add_documents` receive prompts in their metadata
+
+To run the test:
+```bash
+python tools/test_prompt_generation.py
+```
+
+This fix is vital for ensuring that documents in the vector store have the appropriate prompts for guiding LLMs during code analysis.
+
+# Ollama Integration and Prompt Generation Fix
+
+## Issues Fixed
+
+1. **Missing Prompt Generator Initialization**: 
+   The PromptGenerator wasn't being initialized in the SimpleVectorStore constructor, causing prompt generation to be skipped entirely.
+
+2. **Ollama Client Usage**: 
+   The code was not properly using the standard Ollama client, which is preferred over direct API calls.
+
+3. **Code Corruption**: 
+   Fixed multiple instances of code corruption where lines were mixed up or incomplete.
+
+## Implementation Details
+
+### Prompt Generator Initialization
+
+The SimpleVectorStore constructor now properly initializes the PromptGenerator:
+- Creates it only if `generate_prompts` is True
+- Sets up with the correct configuration parameters
+- Includes proper error handling for ImportErrors
+- Logs the initialization status for debugging
+
+### Ollama Client Integration
+
+The Ollama client integration now follows a dual-strategy approach:
+1. First attempts to use the official Python client (`import ollama`)
+2. Falls back to direct API calls via aiohttp if the client is unavailable or fails
+
+This provides more robust Ollama connectivity and better error reporting.
+
+### Debug Utilities
+
+Added a specific test script (`test_ollama_connection.py`) to verify Ollama connectivity, which:
+- Tests both the official client and direct API approaches
+- Provides detailed error reporting
+- Can be run independently to isolate Ollama issues
+
+## Testing
+
+To verify the fix:
+
+1. Test Ollama connectivity directly:
+   ```bash
+   python tools/test_ollama_connection.py
+   ```
+
+2. Test prompt generation specifically:
+   ```bash
+   python tools/test_prompt_generation.py
+   ```
+
+3. Monitor logs during vector store building with prompt generation enabled:
+   ```bash
+   python tools/build_vector_store.py -t jsonl -c test --generate-prompts --use-ollama-for-prompts
+   ```
+
+The logs should now show successful connection to Ollama and prompt generation.
+
+# Prompt Persistence Issues and Fixes
+
+## Identified Issues
+
+After analyzing the vector store code, several potential issues were identified with prompt persistence:
+
+1. **JSON Serialization Errors**: Complex objects in prompts may not be serializable to JSON, causing the entire metadata save to fail.
+2. **Metadata Synchronization**: The document metadata and node metadata may get out of sync.
+3. **Missing Copy Operations**: Using `.get()` without `.copy()` might lead to shared references instead of copied values.
+4. **Verification Gaps**: No validation that prompts are actually saved in the metadata.
+
+## Implemented Fixes
+
+### 1. Enhanced JSON Serialization
+
+Added a custom JSON encoder for the `json.dumps()` call in `_save_document_metadata`:
+
+```python
+json_data = json.dumps(self._documents, default=lambda o: str(o) if not isinstance(o, (dict, list, str, int, float, bool, type(None))) else o)
+```
+
+This ensures that non-serializable objects are converted to strings rather than causing JSON encoding errors.
+
+### 2. Synchronized Node and Document Metadata
+
+In the prompt generation code, both objects now receive explicit copies of the metadata:
+
+```python
+doc['metadata']['prompt'] = prompt
+node.metadata['prompt'] = prompt  # Ensure node gets the exact same value
+```
+
+This ensures that the node's metadata contains the same prompt as the document.
+
+### 3. Explicit Metadata Copying
+
+Added explicit copying of metadata to the document entry:
+
+```python
+# Update doc_entry to have the new metadata
+doc_entry['metadata'] = doc.get('metadata', {}).copy()
+```
+
+This ensures that each document entry has its own copy of the metadata.
+
+### 4. Verification Logging
+
+Added logging before and after saving metadata to verify that prompts are included:
+
+```python
+# Log before saving
+prompt_count = sum(1 for doc in self._documents if 'prompt' in doc.get('metadata', {}))
+logger.info(f"Saving metadata with {prompt_count}/{len(self._documents)} documents containing prompts")
+
+# Verify after saving
+with open(metadata_path, 'r') as f:
+    saved_data = json.load(f)
+    saved_prompt_count = sum(1 for doc in saved_data if 'prompt' in doc.get('metadata', {}))
+logger.info(f"Verified saved metadata: {saved_prompt_count}/{len(saved_data)} documents with prompts")
+```
+
+### 5. Prompt Verification Tool
+
+Created a dedicated `verify_prompts.py` script to:
+- Check if prompts are properly saved in the metadata
+- Show statistics about prompt presence and sizes
+- Display sample prompts for verification
+
+## Implementation Notes
+
+The key insight is that while prompts are properly generated, they might be lost during:
+1. The transfer from document to node metadata
+2. The creation of the document entry
+3. The serialization to JSON
+
+The implemented fixes address all three potential points of failure.
 

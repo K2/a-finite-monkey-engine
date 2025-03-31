@@ -1,0 +1,331 @@
+# Finite Monkey Engine - Mindmap
+
+## Core System
+- Pipeline
+  - Document Loading
+    - Local file loading
+    - GitHub repository loading
+    - File filtering and preprocessing
+  - Chunking
+    - Contract-aware chunking
+    - Function-level chunking
+    - Custom chunk sizing
+    - Overlap configuration
+  - Function Extraction
+    - Function signature parsing
+    - Parameter extraction
+    - Return value identification
+    - Modifier detection
+  - Business Flow Analysis
+    - Function call graph generation
+    - Business logic mapping
+    - Contract interaction modeling
+    - Event sequence identification
+  - Data Flow Analysis
+    - Source-to-sink path identification
+    - Taint propagation analysis
+    - Control variable influence evaluation
+    - Business flow integration
+    - Path exploitability scoring
+  - Vulnerability Scanning
+    - Pattern-based detection
+    - LLM-based analysis
+    - Severity classification
+    - Impact assessment
+    - Remediation recommendations
+  - Cognitive Bias Analysis
+    - Optimism bias detection
+    - Anchoring bias detection
+    - Confirmation bias detection
+    - Authority bias detection
+    - Developer assumption analysis
+  - Documentation Analysis
+    - NatSpec compliance checking
+    - Documentation coverage metrics
+    - Security documentation evaluation
+    - Documentation quality scoring
+  - Documentation Inconsistency Detection
+    - Code-comment misalignment identification
+    - Security implication assessment
+    - Misleading documentation detection
+    - Comment accuracy evaluation
+  - Counterfactual Analysis
+    - "What if" scenario generation
+    - Edge case identification
+    - Parameter extreme testing
+    - Attack vector simulation
+    - Exploit path construction
+  - Report Generation
+    - Finding aggregation and deduplication
+    - Cross-analyzer finding correlation
+    - HTML report formatting
+    - JSON finding export
+    - Visualization generation
+- CLI Interface
+  - argparse-based commands
+    - analyze: Complete contract analysis
+    - test-chunking: Test chunking on individual files
+    - chunk-directory: Process all files in a directory 
+    - process-project: Load and chunk an entire project
+  - Option handling
+    - Input/output configuration
+    - Verbosity settings
+    - Processing limits
+- Configuration
+  - Model settings
+    - LLM model selection
+    - Embedding model configuration
+    - Temperature controls
+    - Request timeouts
+  - Processing parameters
+    - Chunk size and overlap
+    - Concurrent processing limits
+    - Memory usage controls
+    - LLM token limits
+
+## LLM Integration
+- LlamaIndex
+  - Settings-based configuration (updated from ServiceContext)
+    - Global settings management
+    - Per-component configuration
+    - Response caching
+  - LLM models
+    - qwen2.5-coder:7b-instruct-q8_0
+    - Code Llama models
+    - Multi-model failover support
+  - Embedding models
+    - BAAI/bge-small-en-v1.5
+    - Hugging Face embedding models
+    - Context-aware embedding strategies
+- Prompt Engineering
+  - Vulnerability analysis prompts
+    - Pattern-specific prompting
+    - Context-focused questioning
+    - Chain-of-thought techniques
+  - Business flow extraction prompts
+    - Function relationship identification
+    - State transition modeling
+    - User flow extraction
+  - Data flow analysis prompts
+    - Source-sink path reasoning
+    - Path exploitability assessment
+    - Control flow influence prompting
+  - Cognitive bias prompts
+    - Bias pattern identification
+    - Developer assumption extraction
+    - Security implication linking
+  - Counterfactual scenario prompts
+    - Edge case construction
+    - Attack path simulation
+    - Exploit condition identification
+  - Cross-component context sharing
+    - Business-security context bridging
+    - Flow-vulnerability correlation
+    - Bias-counterfactual integration
+  - JSON response formatting
+    - Schema-driven output
+    - Error correction strategies
+    - Result validation
+
+## Analysis Components
+- Vulnerability Scanner
+  - JSON response parsing
+    - Schema validation
+    - Result normalization
+    - Error handling
+  - Pattern detection
+    - Common vulnerability pattern matching
+    - Custom pattern definition
+    - Pattern sensitivity controls
+  - Security metrics
+    - Severity scoring
+    - Exploitability assessment
+    - Impact evaluation
+    - Confidence ratings
+- Business Flow Extractor
+  - Function relationship analysis
+    - Call graph generation
+    - Function dependency mapping
+    - Interaction sequencing
+  - Data flow mapping
+    - State variable tracking
+    - Parameter flow analysis
+    - Return value propagation
+  - Contract interaction modeling
+    - Multi-contract flow analysis
+    - Cross-contract dependencies
+    - Interface implementation mapping
+- Contract Analyzer
+  - Solidity parsing
+    - AST generation
+    - Token extraction
+    - Syntax validation
+  - Function identification
+    - Signature matching
+    - Access control analysis
+    - State mutation detection
+  - Event analysis
+    - Event emission tracking
+    - Log parameter extraction
+    - User notification patterns
+- Data Flow Analyzer
+  - Source-to-sink path tracing
+    - User input identification
+    - Vulnerable operation detection
+    - Path construction and visualization
+  - Taint propagation
+    - Variable taint tracking
+    - Cross-function taint propagation
+    - Storage taint analysis
+  - Control variable analysis
+    - Condition identification
+    - Branch influence evaluation
+    - Path feasibility assessment
+  - Business flow integration
+    - Business-security alignment
+    - Critical flow prioritization
+    - Impact contextualization
+- Cognitive Bias Analyzer
+  - Optimism bias detection
+    - Over-confidence identification
+    - Failure handling assessment
+    - Error case omission detection
+  - Anchoring bias detection
+    - Default value dependence
+    - Reference point fixation
+    - Pattern-following behavior
+  - Confirmation bias detection
+    - Selective validation coding
+    - Assumption reinforcement
+    - Contradictory evidence handling
+  - Authority bias detection
+    - Pattern copying evaluation
+    - Standard-following assessment
+    - Independent validation checking
+  - Developer assumption analysis
+    - Implicit assumption extraction
+    - Assumption validation
+    - Exploitability assessment
+- Documentation Analyzer
+  - NatSpec evaluation
+    - Format compliance checking
+    - Required tag verification
+    - Completeness assessment
+  - Documentation-to-code ratio
+    - Line coverage metrics
+    - Function documentation percentage
+    - Critical component coverage
+  - Documentation completeness assessment
+    - Parameter documentation
+    - Return value documentation
+    - Error condition documentation
+    - Security consideration inclusion
+  - Quality scoring
+    - Clarity evaluation
+    - Technical accuracy
+    - Security relevance
+    - User comprehension assessment
+- Documentation Inconsistency Analyzer
+  - Code-comment inconsistency detection
+    - Functional mismatch identification
+    - Outdated documentation detection
+    - Missing check documentation
+  - Security implication analysis
+    - Security guarantee assessment
+    - Misleading security claims
+    - False protection assertions
+  - Misleading documentation detection
+    - Partial truth identification
+    - Technically correct but misleading
+    - Ambiguous wording detection
+  - Context-aware analysis
+    - Vulnerability-documentation correlation
+    - Security finding integration
+    - Surrounding code evaluation
+- Counterfactual Analyzer
+  - "What if" scenario generation
+    - Contract state permutation
+    - Function call sequence variation
+    - Parameter value extremes
+  - Parameter edge case analysis
+    - Integer boundary testing
+    - Empty/null value handling
+    - Maximum size inputs
+  - Cross-cutting concern assessment
+    - Gas limitation scenarios
+    - Blockchain mechanism exploitation
+    - Protocol interaction edge cases
+  - Detailed exploit path analysis
+    - Step-by-step attack vectors
+    - Required pre-conditions
+    - Technical difficulty assessment
+    - Real-world relevance evaluation
+
+## Utilities
+- Chunking
+  - Contract-aware chunking
+    - Function boundary preservation
+    - Related code grouping
+    - Semantic chunk creation
+  - Function-level splitting
+    - Signature-based chunking
+    - Modifier grouping
+    - Related function clustering
+  - Custom chunk strategies
+    - Import chunking
+    - Interface chunking
+    - Event chunking
+- GitHub Integration
+  - Repository cloning
+    - Branch selection
+    - Depth-limited cloning
+    - Authentication handling
+  - File filtering
+    - Extension-based filtering
+    - Directory focusing
+    - Pattern-based inclusion/exclusion
+  - Repository metadata extraction
+    - Commit history analysis
+    - Contributor information
+    - Repository statistics
+- Async Processing
+  - Task management
+    - Concurrent execution
+    - Task prioritization
+    - Memory-aware scheduling
+  - Resource control
+    - Semaphore-based limiting
+    - Adaptive concurrency
+    - Batch processing
+  - Error handling
+    - Graceful degradation
+    - Partial result handling
+    - Exception recovery
+- Flow Joining
+  - Business flow and dataflow correlation
+    - Flow intersection detection
+    - Shared node identification
+    - Impact alignment
+  - Finding enrichment
+    - Cross-domain finding enhancement
+    - Context addition
+    - Relevance scoring
+  - Cross-analyzer context sharing
+    - Intermediate result passing
+    - Analysis result integration
+    - Insight correlation
+- Visualization
+  - Graph visualization
+    - Contract relationship graphs
+    - Function call graphs
+    - Data flow diagrams
+    - Business flow maps
+  - Heatmap generation
+    - Vulnerability density maps
+    - Cognitive bias distribution
+    - Documentation coverage visualization
+  - Interactive HTML reports
+    - Filterable findings
+    - Collapsible sections
+    - Source code integration
+    - Visual annotations

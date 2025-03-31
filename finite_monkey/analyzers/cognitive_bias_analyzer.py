@@ -16,7 +16,7 @@ from ..pipeline.core import Context
 from ..models.analysis import BiasAnalysisResult, AssumptionAnalysis
 from ..utils.json_repair import safe_parse_json, extract_json_from_text
 from ..llm.llama_index_adapter import LlamaIndexAdapter
-from finite_monkey.nodes_config import config
+from finite_monkey.nodes_config import Settings, config
 
 class CognitiveBiasAnalyzer:
     """
@@ -80,141 +80,413 @@ class CognitiveBiasAnalyzer:
         
     async def process(self, context: Context) -> Context:
         """
-        Process the context to detect cognitive biases in the smart contracts.
+        Process the context to analyze cognitive biases
         
         Args:
-            context: The context containing the contracts to analyze
+            context: Processing context with contract files
             
         Returns:
-            Updated context with cognitive bias analysis
+            Updated context
         """
-        logger.info("Starting cognitive bias analysis")
+        logger.info(f"Starting cognitive bias analysis with model {config.COGNITIVE_BIAS_MODEL}")
+        logger.info(f"Provider: {config.COGNITIVE_BIAS_MODEL_PROVIDER}, Base URL: {config.COGNITIVE_BIAS_MODEL_BASE_URL}")
         
-        # Initialize cognitive biases dict in context if not present
-        if not hasattr(context, 'cognitive_biases'):
-            context.cognitive_biases = {}
-        
-        # Check if contracts are available
-        if not hasattr(context, 'contracts') or not context.contracts:
-            logger.warning("No contracts found for cognitive bias analysis")
+        if self.llm_adapter is None:
+            logger.error("No LLM adapter available for cognitive bias analysis")
+            context.add_error(
+                stage="cognitive_bias_analysis",
+                message="No LLM adapter available for cognitive bias analysis"
+            )
             return context
+        
+        # Initialize cognitive biases dictionary in context if not present
+        if not hasattr(context, "cognitive_biases"):
+            context.cognitive_biases = {}
             
-        # Analyze each contract
-        for contract in context.contracts:
-            contract_name = getattr(contract, 'name', None)
-            contract_path = getattr(contract, 'file_path', None)
-            contract_content = getattr(contract, 'content', None) or getattr(contract, 'code', None)
-            
-            if not contract_name or not contract_content:
-                logger.warning(f"Missing name or content for contract: {contract_path}")
+        # Analyze each file for cognitive biases
+        for file_id, file_data in context.files.items():
+            # Skip non-Solidity files
+            if not file_data.get("is_solidity", False):
                 continue
                 
             try:
-                # Analyze the contract code for cognitive biases
-                contract_biases = await self._analyze_contract(contract_name, contract_content)
+                # Extract contract name from file path
+                contract_name = os.path.basename(file_data.get("path", file_id))
+                if contract_name.endswith(".sol"):
+                    contract_name = contract_name[:-4]
                 
-                # Add to context
-                if contract_biases:
-                    context.cognitive_biases[contract_name] = contract_biases
-                    logger.info(f"Found {len(contract_biases)} cognitive biases in {contract_name}")
+                # Initial pattern-based bias detection
+                content = file_data["content"]
+                biases = self._detect_biases_with_patterns(content)
+                
+                # Apply LLM-based bias detection
+                llm_biases = await self._detect_biases_with_llm(content, contract_name)
+                
+                # Merge results, prioritizing LLM findings
+                for bias_type, instances in llm_biases.items():
+                    if bias_type in biases:
+                        # Add only non-duplicate instances
+                        existing_locations = set(i["location"] for i in biases[bias_type])
+                        for instance in instances:
+                            if instance["location"] not in existing_locations:
+                                biases[bias_type].append(instance)
+                    else:
+                        biases[bias_type] = instances
+                
+                # Create bias analysis result
+                result = BiasAnalysisResult(
+                    contract_name=contract_name,
+                    file_path=file_data.get("path", file_id),
+                    biases=biases,
+                    analysis_date=None  # Will be set automatically
+                )
+                
+                # Store in context
+                context.cognitive_biases[file_id] = result
+                
+                # Log findings
+                total_biases = sum(len(instances) for instances in biases.values())
+                logger.info(f"Found {total_biases} potential cognitive biases in {contract_name}")
+                
             except Exception as e:
-                # Fix: Ensure we're not using format specifiers in the error message
-                error_msg = str(e).replace("%", "%%")  # Escape percent signs
-                logger.error(f"Error analyzing cognitive biases in {contract_path}: {error_msg}")
-                context.add_error(f"Failed to analyze file: {contract_path}", e)
+                logger.error(f"Error analyzing cognitive biases in {file_id}: {str(e)}")
+                context.add_error(
+                    stage="cognitive_bias_analysis",
+                    message=f"Failed to analyze file: {file_id}",
+                    exception=e
+                )
+        
+        # Cross-contract analysis
+        await self._analyze_cross_contract_biases(context)
         
         return context
     
-    async def _analyze_contract(self, contract_name: str, contract_content: str) -> List[Dict[str, Any]]:
+    def _detect_biases_with_patterns(self, content: str) -> Dict[str, List[Dict[str, Any]]]:
         """
-        Analyze a contract for cognitive biases.
+        Detect cognitive biases using regex patterns
         
         Args:
-            contract_name: Name of the contract
-            contract_content: Solidity code of the contract
+            content: Contract code content
             
         Returns:
-            List of detected cognitive biases
+            Dictionary of biases by type
         """
-        # For simplicity, we'll use pattern matching to detect common biases
-        biases = []
+        biases = {}
+        lines = content.split("\n")
         
-        # Check for overconfidence bias (no error handling)
-        overconfidence_matches = re.finditer(
-            r'(\w+\s*\.\s*(?:transfer|call|send|delegatecall)\s*\([^;]+\))\s*(?![^;]*(?:require|assert|revert|if\s*\([^)]*(?:success|fail)))',
-            contract_content
-        )
-        
-        for match in overconfidence_matches:
-            line_number = contract_content[:match.start()].count('\n') + 1
-            biases.append({
-                "type": "Overconfidence Bias",
-                "description": "Function assumes external call will succeed without proper error handling",
-                "impact": "High - May lead to transaction failures or lock funds",
-                "location": f"Line {line_number}",
-                "code": match.group(1).strip()
-            })
+        for bias_type, patterns in self.bias_patterns.items():
+            instances = []
             
-        # Check for authority bias (overreliance on onlyOwner)
-        authority_matches = re.finditer(
-            r'modifier\s+onlyOwner|require\s*\(\s*(?:msg\.sender\s*==\s*owner|owner\s*==\s*msg\.sender)',
-            contract_content
-        )
-        
-        for match in authority_matches:
-            line_number = contract_content[:match.start()].count('\n') + 1
-            
-            # Avoid duplicate reporting - only add if this is a new location
-            if not any(b["location"] == f"Line {line_number}" and b["type"] == "Authority Bias" for b in biases):
-                biases.append({
-                    "type": "Authority Bias",
-                    "description": "Centralized control pattern may indicate authority bias",
-                    "impact": "Medium - May lead to centralization risks",
-                    "location": f"Line {line_number}",
-                    "code": match.group(0).strip()
-                })
+            for i, line in enumerate(lines):
+                line_number = i + 1
                 
-        # Check for Availability Bias (comments indicating specific concerns)
-        availability_matches = re.finditer(
-            r'//\s*(?:TODO|FIXME|WARNING|DANGER|SECURITY)\s*:([^\n]*)',
-            contract_content,
-            re.IGNORECASE
-        )
-        
-        for match in availability_matches:
-            line_number = contract_content[:match.start()].count('\n') + 1
-            biases.append({
-                "type": "Availability Bias",
-                "description": f"Comment highlights specific concern: {match.group(1).strip()}",
-                "impact": "Medium - May indicate focus on known issues at expense of unknown issues",
-                "location": f"Line {line_number}",
-                "code": match.group(0).strip()
-            })
+                for pattern in patterns:
+                    if re.search(pattern, line, re.IGNORECASE):
+                        # Extract surrounding context
+                        start = max(0, i - 2)
+                        end = min(len(lines), i + 3)
+                        context_lines = lines[start:end]
+                        
+                        instances.append({
+                            "location": f"Line {line_number}",
+                            "line_number": line_number,
+                            "context": "\n".join(context_lines),
+                            "description": f"Potential {bias_type.replace('_', ' ')} detected",
+                            "pattern": pattern,
+                            "confidence": "low"  # Pattern-based detection has lower confidence
+                        })
             
+            if instances:
+                biases[bias_type] = instances
+        
         return biases
     
-    def _format_code_snippet(self, content: str, line_number: int, context_lines: int = 2) -> str:
+    async def _detect_biases_with_llm(self, content: str, contract_name: str) -> Dict[str, List[Dict[str, Any]]]:
         """
-        Extract a code snippet around the specified line number.
+        Detect cognitive biases using LLM analysis
         
         Args:
-            content: Full contract content
-            line_number: Line number to center the snippet around
-            context_lines: Number of lines of context to include
+            content: Contract code content
+            contract_name: Name of the contract
             
         Returns:
-            Formatted code snippet
+            Dictionary of biases by type
         """
-        lines = content.split('\n')
+        biases = {}
         
-        # Calculate start and end lines with bounds checking
-        start_line = max(0, line_number - context_lines - 1)
-        end_line = min(len(lines), line_number + context_lines)
-        
-        # Build the snippet
-        snippet = []
-        for i in range(start_line, end_line):
-            prefix = '>' if i == line_number - 1 else ' '
-            snippet.append(f"{prefix} {i+1}: {lines[i]}")
+        if not self.llm_adapter or not hasattr(self.llm_adapter, 'llm'):
+            logger.warning("No LLM available for cognitive bias detection")
+            return biases
             
-        return '\n'.join(snippet)
+        llm = self.llm_adapter.llm
+        
+        # Create prompt for cognitive bias detection
+        prompt = f"""
+        You are a smart contract auditor specializing in cognitive bias detection. Analyze the following Solidity contract for potential cognitive biases in its design and implementation.
+        
+        Contract: {contract_name}
+        
+        ```solidity
+        {content}
+        ```
+        
+        Identify cognitive biases including but not limited to:
+        1. Optimism bias - assuming things will always work correctly
+        2. Anchoring bias - relying too heavily on initial information
+        3. Confirmation bias - interpreting information to confirm existing beliefs
+        4. Authority bias - deferring to standards without understanding them
+        5. Status quo bias - resistance to change
+        
+        Format your response as a JSON object with bias types as keys and arrays of instances as values:
+        
+        ```json
+        {
+          "optimism_bias": [
+            {
+              "location": "Line 42",
+              "description": "Assumes transaction will always succeed without error handling"
+            }
+          ],
+          "anchoring_bias": [
+            {
+              "location": "Line 105",
+              "description": "Hardcoded gas limits could be problematic with future Ethereum upgrades"
+            }
+          ]
+        }
+        ```
+        
+        Only include biases that you have high or medium confidence in. Focus on substantive issues that could impact contract security or functionality.
+        """
+        
+        try:
+            # Get response from LLM
+            response = await llm.acomplete(prompt)
+            response_text = response.text
+            
+            # Extract JSON from response
+            json_str = extract_json_from_text(response_text)
+            
+            # Parse JSON
+            results = safe_parse_json(json_str)
+                
+            # Process each bias type
+            for bias_type, instances in results.items():
+                if not isinstance(instances, list):
+                    continue
+                
+                # Process each instance
+                valid_instances = []
+                for instance in instances:
+                    if not isinstance(instance, dict):
+                        continue
+                    
+                    # Extract line number
+                    line_number = None
+                    if "location" in instance:
+                        line_match = re.search(r'Line\s+(\d+)', instance["location"])
+                        if line_match:
+                            line_number = int(line_match.group(1))
+                    
+                    instance["line_number"] = line_number
+                    instance["confidence"] = "medium"  # LLM-based detection has medium confidence
+                    valid_instances.append(instance)
+                
+                if valid_instances:
+                    biases[bias_type] = valid_instances
+                
+        except Exception as e:
+            logger.error(f"Error in LLM-based bias detection for {contract_name}: {str(e)}")
+        
+        return biases
+    
+    async def _analyze_cross_contract_biases(self, context: Context):
+        """
+        Analyze cognitive biases across multiple contracts
+        
+        Args:
+            context: Processing context
+        """
+        # Skip if no LLM is available or not enough contracts
+        if not hasattr(context, "cognitive_biases") or len(context.cognitive_biases) < 2:
+            return
+        
+        # Collect contract names and most common biases
+        contracts = []
+        common_biases = {}
+        
+        for file_id, bias_result in context.cognitive_biases.items():
+            contracts.append(bias_result.contract_name)
+            # Collect bias types and instances
+            for bias_type, instances in bias_result.biases.items():
+                if bias_type not in common_biases:
+                    common_biases[bias_type] = 0
+                common_biases[bias_type] += len(instances)
+        
+        # Find most common biases
+        top_biases = sorted(common_biases.items(), key=lambda x: x[1], reverse=True)[:3]
+        top_bias_types = [bias_type for bias_type, _ in top_biases]
+        
+        # Add cross-contract bias analysis
+        context.cross_contract_biases = {
+            "contracts_analyzed": contracts,
+            "common_biases": top_bias_types,
+            "description": f"Project-wide tendency toward {', '.join(top_bias_types)}"
+        }
+        
+        logger.info(f"Completed cross-contract bias analysis across {len(contracts)} contracts")
+    
+    async def _generate_assumption_analysis(self, context: Context):
+        """
+        Generate analysis of developer assumptions
+        
+        Args:
+            context: Processing context
+        """
+        # Skip if no LLM is available
+        llm = None
+        if self.llm_adapter and hasattr(self.llm_adapter, 'llm'):
+            llm = self.llm_adapter.llm
+        else:
+            llm = Settings.llm
+        
+        if not llm:
+            logger.warning("No LLM available for assumption analysis")
+            return
+        
+        # Collect all biases
+        all_biases = {}
+        for file_id, bias_result in context.cognitive_biases.items():
+            for bias_type, instances in bias_result.biases.items():
+                if bias_type not in all_biases:
+                    all_biases[bias_type] = []
+                all_biases[bias_type].extend(instances)
+        
+        # Skip if no biases found
+        if not all_biases:
+            return
+        
+        # Format biases for LLM
+        bias_summary = ""
+        for bias_type, instances in all_biases.items():
+            bias_summary += f"\n{bias_type.replace('_', ' ').title()}:\n"
+            for i, instance in enumerate(instances[:5]):  # Limit to 5 examples per bias
+                bias_summary += f"- {instance.get('description', 'No description')}\n"
+        
+        # Create a prompt for assumption analysis
+        prompt = f"""
+        You are a smart contract security expert analyzing cognitive biases and developer assumptions in a project.
+        
+        Based on the cognitive biases detected in the codebase, identify the key assumptions that developers are making
+        that could lead to security vulnerabilities or logical errors.
+        
+        Detected Biases:
+        {bias_summary}
+        
+        For each underlying assumption, provide:
+        1. A clear statement of the assumption
+        2. Why this assumption is problematic
+        3. How this assumption might be exploited or lead to failures
+        4. A recommendation to address this assumption
+        
+        Format your response as valid JSON:
+        ```json
+        {{
+          "assumptions": [
+            {{
+              "statement": "The contract assumes that token transfers always succeed",
+              "risk": "Some tokens return false instead of reverting on failure",
+              "potential_exploit": "An attacker could use a non-standard token that doesn't revert to drain funds",
+              "recommendation": "Always check the return value of token transfers or use SafeERC20"
+            }},
+            ...
+          ],
+          "summary": "Brief summary of the overall assumption patterns"
+        }}
+        ```
+        """
+        
+        try:
+            # Get response from LLM
+            response = await llm.acomplete(prompt)
+            response_text = response.text
+            
+            # Extract JSON from response
+            json_str = extract_json_from_text(response_text)
+            
+            # Parse JSON
+            results = safe_parse_json(json_str)
+                
+            # Create assumption analysis
+            assumption_analysis = AssumptionAnalysis(
+                assumptions=results.get("assumptions", []),
+                summary=results.get("summary", "No summary available")
+            )
+            
+            # Store in context
+            context.assumption_analysis = assumption_analysis
+            
+            logger.info(f"Generated assumption analysis with {len(assumption_analysis.assumptions)} key assumptions")
+                
+        except Exception as e:
+            logger.error(f"Error in assumption analysis: {str(e)}")
+
+    async def _extract_flows_with_llm(self, func: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Extract business flows using LLM"""
+        # Define schema for LLM response
+        schema = {
+            "type": "object",
+            "properties": {
+                "businessFlows": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "type": {"type": "string"},
+                            "description": {"type": "string"},
+                            "confidence": {"type": "number"}
+                        }
+                    }
+                },
+                "notes": {"type": "string"},
+                "confidence": {"type": "number"},
+                "f1_score": {"type": "number"}
+            }
+        }
+        
+        # Create prompt for LLM
+        function_text = func.get("full_text", "")
+        function_name = func.get("name", "")
+        contract_name = func.get("contract_name", "")
+        
+        prompt = f"""
+    Analyze the following Solidity function and identify the business flows it implements.
+    Focus on operations like token transfers, access control, state changes, etc.
+
+    Contract: {contract_name}
+    Function: {function_name}
+
+    ```solidity
+    {function_text}
+    ```
+
+    Identify the main business flows present in this function and respond in JSON format with the following structure:
+    {{
+        "businessFlows": [
+            {{
+                "type": "string - e.g. token_transfer, access_control, state_change",
+                "description": "Detailed description of the business flow",
+                "confidence": 0.0-1.0
+            }}
+        ],
+        "notes": "Add any notes about information that would be helpful but is missing, or tools you would like access to",
+        "confidence": 0.0-1.0,
+        "f1_score": 0.0-1.0
+    }}
+
+    In the notes field, please indicate any missing information or tools that would help improve your analysis.
+    For confidence, rate your certainty in the analysis from 0.0 to 1.0.
+    For f1_score, estimate your precision/recall balance from 0.0 to 1.0.
+    """
+        
+        # ...existing code...

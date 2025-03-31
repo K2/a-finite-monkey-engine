@@ -89,6 +89,7 @@ finite_monkey/pipeline/enhanced_audit.py
 finite_monkey/pipeline/executor.py
 finite_monkey/pipeline/factory.py
 finite_monkey/pipeline/functional_pipeline.py
+finite_monkey/pipeline/joiner.py
 finite_monkey/pipeline/logging.py
 finite_monkey/pipeline/model_verifier.py
 finite_monkey/pipeline/orchestrator.py
@@ -108,6 +109,7 @@ finite_monkey/sitter/analyzer.py
 finite_monkey/sitter/sitter.py
 finite_monkey/sitter/sitterQL.py
 finite_monkey/utils/__init__.py
+finite_monkey/utils/api_helpers.py
 finite_monkey/utils/ast_analysis.py
 finite_monkey/utils/async_analysis.py
 finite_monkey/utils/async_call_graph.py
@@ -115,6 +117,7 @@ finite_monkey/utils/async_doc_loader.py
 finite_monkey/utils/async_parser.py
 finite_monkey/utils/chunking.py
 finite_monkey/utils/db_security_domains.py
+finite_monkey/utils/entity_helpers.py
 finite_monkey/utils/flow_joiner.py
 finite_monkey/utils/functional.py
 finite_monkey/utils/guidance_program.py
@@ -122,6 +125,8 @@ finite_monkey/utils/guidance_version_utils.py
 finite_monkey/utils/json_extractor.py
 finite_monkey/utils/json_repair.py
 finite_monkey/utils/llm_diagnostics.py
+finite_monkey/utils/llm_interface.py
+finite_monkey/utils/llm_method_resolver.py
 finite_monkey/utils/llm_monitor.py
 finite_monkey/utils/llm_utils.py
 finite_monkey/utils/logger.py
@@ -183,10 +188,13 @@ tests/test_chunking.py
 tests/test_chunking_standalone.py
 tests/test_claude_adapter.py
 tests/test_cognitive_bias.py
+tests/test_direct_guidance.py
 tests/test_entrypoints.py
 tests/test_guidance_integration.py
 tests/test_guidance_syntax.py
+tests/test_guidance_version_utils_integrity.py
 tests/test_imports.py
 tests/test_json_extraction.py
 tests/test_linguistic_analysis.py
 tests/test_task_manager.py
+tests/test_template_processing.py

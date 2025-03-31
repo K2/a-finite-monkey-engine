@@ -1,13 +1,47 @@
+# IDE and editor files
+.vscode/
 .vscode/launch.json
-uv.lock
-**/lancedb/**
-*/node_modules/*
-**/node_modules/**
-**/logs/**
-**/.uv/**
 **/.vscode/**
-**/.venv/**
+**/.idea/**
+*.swp
+*.swo
+.DS_Store
+
+# Python-related files
 **/__pycache__/**
-*.pyc
-**/*.pyc
-*/*/__pycache__/*.pyc
+**/.pytest_cache/**
+**/.mypy_cache/**
+**/.ruff_cache/**
+**/.venv/**
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+
+# Python packaging
+**/.uv/**
+uv.lock
+*.egg-info/
+dist/
+build/
+
+# JavaScript/Node.js
+**/node_modules/**
+npm-debug.log
+yarn-error.log
+yarn-debug.log
+package-lock.json
+
+# Vector store and database files
+**/lancedb/**
+vector_store*/
+
+# Logs
+**/logs/**
+*.log
+*.bak
+**/backups/**
+
+# Environment variables
+.env
+.env.*
+!.env.example

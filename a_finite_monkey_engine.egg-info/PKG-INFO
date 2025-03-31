@@ -17,7 +17,6 @@ License-File: LICENSE
 Requires-Dist: ghapi>=0.1.19
 Requires-Dist: loguru>=0.7.0
 Requires-Dist: llama-cpp-python>=0.2.0
-Requires-Dist: llama-index>=0.10.0
 Requires-Dist: httpx>=0.27.0
 Requires-Dist: SQLAlchemy>=2.0.25
 Requires-Dist: asyncpg>=0.29.0
@@ -37,6 +36,7 @@ Requires-Dist: ipython>=8.12.0
 Requires-Dist: pydantic>=2.5.2
 Requires-Dist: griffe>=1.6.0
 Requires-Dist: pydantic-settings>=2.8.1
+Requires-Dist: openzeppelin-solidity-grammar-parser>=0.0.5
 Requires-Dist: aiofiles>=24.1.0
 Requires-Dist: yappi>=1.6.10
 Requires-Dist: ollama>=0.4.7
@@ -47,16 +47,14 @@ Requires-Dist: python-box>=7.3.2
 Requires-Dist: typer>=0.15.2
 Requires-Dist: matplotlib>=3.10.1
 Requires-Dist: llama-index-program-guidance>=0.3.0
-Requires-Dist: antlr4-python3-runtime
-Requires-Dist: openzeppelin-solidity-grammar-parser
+Requires-Dist: llama-index>=0.12.26
+Requires-Dist: aiohttp>=3.11.14
 Requires-Dist: llama-index-question-gen-guidance>=0.3.0
-Requires-Dist: llama-index-question-gen-openai>=0.3.0
-Requires-Dist: guidance>=0.1.16
-Requires-Dist: llama-index-llms-openai>=0.3.25
-Requires-Dist: llama-index-program-openai>=0.3.1
-Requires-Dist: openai>=1.68.2
-Requires-Dist: pytest>=8.3.5
 Requires-Dist: pytest-asyncio>=0.26.0
+Requires-Dist: torchvision>=0.21.0
+Requires-Dist: torchaudio>=2.6.0
+Requires-Dist: intel-extension-for-pytorch>=2.6.0
+Requires-Dist: llama-index-embeddings-ollama>=0.6.0
 Provides-Extra: dev
 Requires-Dist: pytest>=7.0.0; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.20.0; extra == "dev"

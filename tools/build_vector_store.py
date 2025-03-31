@@ -668,7 +668,8 @@ async def build_vector_store(
     collection_name: str,
     replace_existing: bool = False,
     embedding_model: str = "local",
-    embedding_device: str = "auto"
+    embedding_device: str = "auto",
+    multi_llm_prompts: bool = True
 ) -> bool:
     """
     Build vector store from documents.
@@ -680,12 +681,13 @@ async def build_vector_store(
         replace_existing: Whether to replace existing collection
         embedding_model: Model to use for embeddings
         embedding_device: Device to run embeddings on
+        multi_llm_prompts: Enable multi-LLM prompts
         
     Returns:
         Success status
     """
     if not documents:
-        logger.error("No documents to add to vector store")
+        logger.warning("No documents provided to build_vector_store")
         return False
     
     try:
