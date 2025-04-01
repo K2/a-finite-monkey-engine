@@ -48,13 +48,13 @@ Requires-Dist: typer>=0.15.2
 Requires-Dist: matplotlib>=3.10.1
 Requires-Dist: llama-index-program-guidance>=0.3.0
 Requires-Dist: llama-index>=0.12.26
-Requires-Dist: aiohttp>=3.11.14
 Requires-Dist: llama-index-question-gen-guidance>=0.3.0
 Requires-Dist: pytest-asyncio>=0.26.0
 Requires-Dist: torchvision>=0.21.0
 Requires-Dist: torchaudio>=2.6.0
 Requires-Dist: intel-extension-for-pytorch>=2.6.0
 Requires-Dist: llama-index-embeddings-ollama>=0.6.0
+Requires-Dist: llama-index-tools-azure-code-interpreter>=0.4.0
 Provides-Extra: dev
 Requires-Dist: pytest>=7.0.0; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.20.0; extra == "dev"

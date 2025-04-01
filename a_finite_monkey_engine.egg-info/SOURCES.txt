@@ -80,6 +80,7 @@ finite_monkey/models/query.py
 finite_monkey/models/reports.py
 finite_monkey/models/security.py
 finite_monkey/models/structured_query.py
+finite_monkey/models/vulnerability.py
 finite_monkey/pipeline/__init__.py
 finite_monkey/pipeline/base.py
 finite_monkey/pipeline/compose.py

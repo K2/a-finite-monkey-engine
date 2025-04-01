@@ -55,13 +55,13 @@ dependencies = [
     "matplotlib>=3.10.1",
     "llama-index-program-guidance>=0.3.0",
     "llama-index>=0.12.26",
-    "aiohttp>=3.11.14",
     "llama-index-question-gen-guidance>=0.3.0",
     "pytest-asyncio>=0.26.0",
     "torchvision>=0.21.0",
     "torchaudio>=2.6.0",
     "intel-extension-for-pytorch>=2.6.0",
     "llama-index-embeddings-ollama>=0.6.0",
+    "llama-index-tools-azure-code-interpreter>=0.4.0",
 ]
 
 [project.optional-dependencies]

@@ -36,14 +36,14 @@ except ImportError:
         'PROMPT_MODEL': "gemma:2b",
         'MULTI_LLM_PROMPTS': False,
         'OLLAMA_TIMEOUT': 900,
-        'PROMPT_TIMEOUT': 900
+        'PROMPT_TIMEOUT': 900,
+        'QUESTION_BASED_PROMPTS': True
     })
 
 def run_sync(func):
     """Run a synchronous function in an asynchronous manner."""
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
-        loop = asyncio.get_event_loop()
         wrapped = functools.partial(func, *args, **kwargs)
         return await loop.run_in_executor(None, wrapped)
     return wrapper
@@ -449,6 +449,23 @@ class SimpleVectorStore:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             self._index = None
+            
+    def _create_derived_embedding_model(self, model_type: str):
+        """
+        Create a locally-derived embedding model (processed on this machine).
+        
+        Args:
+            model_type: Type of model ("ipex" or "huggingface")
+        
+        Returns:
+            Configured embedding model
+        """
+        if model_type == "ipex":
+            return self._create_ipex_embedding_model()
+        else:  # Default to huggingface
+            from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+            logger.info(f"Creating derived HuggingFace embedding with model: BAAI/bge-small-en-v1.5")
+            return HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
 
     def _create_ipex_embedding_model(self):
         """
@@ -480,23 +497,6 @@ class SimpleVectorStore:
             logger.warning("Falling back to standard HuggingFace embedding")
             return HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
 
-    def _create_derived_embedding_model(self, model_type: str):
-        """
-        Create a locally-derived embedding model (processed on this machine).
-        
-        Args:
-            model_type: Type of model ("ipex" or "huggingface")
-        
-        Returns:
-            Configured embedding model
-        """
-        if model_type == "ipex":
-            return self._create_ipex_embedding_model()
-        else:  # Default to huggingface
-            from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-            logger.info(f"Creating derived HuggingFace embedding with model: BAAI/bge-small-en-v1.5")
-            return HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
-
     def _create_acquired_embedding_model(self, provider: str):
         """
         Create an embedding model that acquires embeddings from external services.
@@ -525,10 +525,10 @@ class SimpleVectorStore:
 
     def _create_document_fingerprint(self, document) -> str:
         """
-        Create a unique fingerprint for document deduplication.
+        Create a unique fingerprint for document deduplication with security metadata awareness.
         
         Args:
-            document: Document dictionary or string
+            document: Document dictionary or string containing the code or content
             
         Returns:
             String fingerprint (SHA-256 hash)
@@ -548,7 +548,14 @@ class SimpleVectorStore:
         key_metadata = []
         
         # Include important metadata fields in the fingerprint
-        for field in ['title', 'id', 'source', 'url', 'file_path']:
+        # Security-oriented fields are prioritized for fingerprinting
+        priority_fields = [
+            'title', 'id', 'source', 'url', 'file_path', 
+            'contract_name', 'function_name', 'vulnerability_type',
+            'security_impact', 'severity'
+        ]
+        
+        for field in priority_fields:
             if field in metadata and metadata[field]:
                 if field == 'file_path':
                     # For file paths, use basename to avoid path issues
@@ -556,424 +563,286 @@ class SimpleVectorStore:
                     key_metadata.append(f"{field}:{value}")
                 else:
                     key_metadata.append(f"{field}:{metadata[field]}")
+        
         if key_metadata:
             fingerprint_content += '|' + '|'.join(key_metadata)
         
         # Create SHA-256 hash
-        import hashlib
         fingerprint = hashlib.sha256(fingerprint_content.encode('utf-8')).hexdigest()
+        
+        # Log fingerprint creation for debugging security-related deduplications
+        logger.debug(f"Created document fingerprint: {fingerprint[:8]}... with {len(key_metadata)} metadata fields")
         
         return fingerprint
 
-    async def _load_checkpoint(self, checkpoint_path: str) -> Dict[str, Any]:
+    def _enhance_prompts_with_questions(self, original_prompt: str) -> str:
         """
-        Load checkpoint data to resume processing, using async file I/O.
+        Transform statement-based prompts into question-based exploratory prompts.
+        This encourages the LLM to reason through problems rather than making assertions.
         
         Args:
-            checkpoint_path: Path to the checkpoint file
+            original_prompt: The original prompt text
             
         Returns:
-            Dictionary containing checkpoint data with completed fingerprints, pending nodes and docs
+            Enhanced question-based prompt
         """
-        try:
-            import aiofiles
-            import pickle
-            
-            if not os.path.exists(checkpoint_path):
-                logger.info(f"No checkpoint found at {checkpoint_path}, starting from scratch")
-                return {'completed_fingerprints': [], 'pending_nodes': [], 'pending_docs': []}
-            
-            async with aiofiles.open(checkpoint_path, 'rb') as f:
-                content = await f.read()
-                data = pickle.loads(content)
-            
-            logger.info(f"Loaded checkpoint with {len(data.get('completed_fingerprints', []))} completed documents")
-            return data
-        except Exception as e:
-            logger.error(f"Error loading checkpoint: {e}")
-            return {'completed_fingerprints': [], 'pending_nodes': [], 'pending_docs': []}
+        import re
+        
+        # Check if we should use question-based prompts
+        if not getattr(app_config, "QUESTION_BASED_PROMPTS", True):
+            return original_prompt
+        
+        # Track if we've added security questions
+        security_questions_added = False
+        enhanced_prompt = original_prompt
+        
+        # Add a question-based introduction
+        question_intro = (
+            "Please analyze the following code by answering these questions:\n\n"
+            "1. What potential vulnerabilities or security issues might exist in this code?\n"
+            "2. What is the code not doing that it should be doing to ensure security?\n"
+            "3. Assuming constraints like gas limits or block finality, what might be missing?\n\n"
+        )
+        
+        # Add domain-specific security questions based on content
+        security_domains = {
+            "arithmetic|math|calculation|comput": [
+                "Is there sensitive arithmetic that may cause rounding errors or overflows?",
+                "Are there unchecked mathematical operations that could lead to unexpected results?",
+                "Could there be precision loss or unintended truncation in calculations?"
+            ],
+            "storage|data|state|variable": [
+                "Is the state properly protected from unauthorized modifications?",
+                "Are there race conditions in state transitions?",
+                "Could storage variables be manipulated in unexpected ways?"
+            ],
+            "access|permission|auth": [
+                "Is there appropriate access control implemented?",
+                "Are permission checks consistent throughout the codebase?",
+                "Could privileged operations be executed by unauthorized actors?"
+            ],
+            "external|call|interact": [
+                "Is the code vulnerable to reentrancy attacks?",
+                "Are external calls properly checked for failures?",
+                "Could malicious contracts exploit the interaction patterns?"
+            ]
+        }
+        
+        # Search for domain keywords in the original prompt
+        for pattern, questions in security_domains.items():
+            if re.search(pattern, original_prompt, re.IGNORECASE):
+                for question in questions:
+                    if question not in enhanced_prompt:
+                        if not security_questions_added:
+                            enhanced_prompt += "\n\nAdditional security questions to consider:\n"
+                            security_questions_added = True
+                        enhanced_prompt += f"- {question}\n"
+        
+        # Reference internal security guidelines if appropriate
+        if "guideline" in original_prompt.lower() or "security" in original_prompt.lower():
+            enhanced_prompt += (
+                "\n\nPlease reference our internal security guidelines and the FLARE methodology "
+                "(Find, Lock, Analyze, Remediate, Evaluate) when answering these questions. "
+                "For each potential issue, suggest concrete remediation steps."
+            )
+        
+        # Add an exploratory final question
+        enhanced_prompt += (
+            "\n\nAssuming you're auditing this code, what additional information "
+            "or context would you need to provide a more comprehensive security assessment? "
+            "What aspects of the code deserve closer scrutiny?"
+        )
+        
+        # Ensure we haven't changed the meaning drastically
+        if len(enhanced_prompt) > len(original_prompt) * 2:
+            # If the prompt has more than doubled in size, keep core parts but trim
+            return question_intro + original_prompt
+        
+        return question_intro + enhanced_prompt
 
-    async def _save_checkpoint(self, checkpoint_path: str, data: Dict[str, Any]) -> bool:
+    async def _enhance_prompt_with_security_context(self, prompt: str, document: Dict[str, Any]) -> str:
         """
-        Save checkpoint data to resume from interruptions, using async file I/O.
-            
-        Args:
-            checkpoint_path: Path to save the checkpoint
-            data: Dictionary with checkpoint data
-            
-        Returns:
-            Success status
-        """
-        try:
-            import aiofiles
-            import pickle
-            
-            # Create directory if it doesn't exist
-            os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
-            
-            async with aiofiles.open(checkpoint_path, 'wb') as f:
-                serialized_data = pickle.dumps(data)
-                await f.write(serialized_data)
-            
-            return True
-        except Exception as e:
-            logger.error(f"Error saving checkpoint: {e}")
-            return False
-
-    async def _save_document_metadata(self, index_dir: str) -> bool:
-        """
-        Save document metadata using a per-document file approach for scalability.
-        Each document's data is stored in separate files within dedicated folders.
+        Enhance prompts with security-specific context for better vulnerability detection.
         
         Args:
-            index_dir: Base directory where the vector store index is saved
+            prompt: Original prompt text
+            document: Document with its metadata
             
         Returns:
-            Success status
+            Enhanced prompt with specialized security knowledge
         """
         try:
-            import aiofiles
-            import json
-            import os
+            enhanced_prompt = prompt
+            metadata = document.get('metadata', {})
             
-            # Create a document index for lookup
-            document_index = {
-                "document_ids": [doc.get('id') for doc in self._documents if doc.get('id')],
-                "last_updated": datetime.now().isoformat(),
-                "total_count": len(self._documents)
-            }
+            # 1. Add basic document metadata context
+            metadata_context = "\n\n## Document Context\n" + "\n".join(
+                f"- {key}: {value}" for key, value in metadata.items()
+                if key not in ['prompt', 'multi_llm_prompts'] 
+                and not key.startswith('_') and not isinstance(value, dict)
+            )
+            enhanced_prompt += metadata_context
             
-            # Save the index file
-            index_file_path = os.path.join(index_dir, "document_index.json")
-            async with aiofiles.open(index_file_path, 'w') as f:
-                await f.write(json.dumps(document_index))
+            # 2. Add language-specific security context
+            language = metadata.get('language', self._infer_language(metadata.get('file_path', '')))
+            if language:
+                vulnerability_patterns = self._get_language_vulnerability_patterns(language)
+                if vulnerability_patterns:
+                    enhanced_prompt += f"\n\n## Common Vulnerability Patterns in {language}\n{vulnerability_patterns}"
             
-            # Process each document and save to individual files
-            success_count = 0
-            for doc in self._documents:
-                doc_id = doc.get('id')
-                if not doc_id:
-                    continue
+            # 3. Add Solidity/blockchain-specific context if relevant
+            if language and language.lower() == 'solidity':
+                enhanced_prompt += """
                 
-                # Create a sanitized filename from the document ID
-                safe_id = re.sub(r'[^\w\-\.]', '_', str(doc_id))
-                
-                # Extract document components
-                metadata = doc.get('metadata', {}).copy()
-                
-                # 1. Extract specialized data
-                prompts_data = {}
-                for field in ['prompt', 'multi_llm_prompts', 'invariant_analysis', 'general_flaw_pattern']:
-                    if field in metadata:
-                        prompts_data[field] = metadata.pop(field)
-                
-                patterns_data = {}
-                for field in ['quick_checks', 'api_interactions', 'cognitive_biases', 'counterfactuals']:
-                    if field in metadata:
-                        patterns_data[field] = metadata.pop(field)
-                
-                flows_data = {}
-                for field in ['call_flow', 'call_flow_graph', 'vulnerable_paths', 'entry_points']:
-                    if field in metadata:
-                        flows_data[field] = metadata.pop(field)
-                
-                graph_data = {}
-                for field in list(metadata.keys()):
-                    if field.startswith('graph_'):
-                        graph_data[field] = metadata.pop(field)
-                
-                # 2. Save core metadata (without specialized fields)
-                metadata_file = os.path.join(self.metadata_dir, f"{safe_id}.json")
-                core_doc = {
-                    'id': doc_id,
-                    'metadata': metadata,
-                    'timestamp': doc.get('timestamp', datetime.now().isoformat())
-                }
-                async with aiofiles.open(metadata_file, 'w') as f:
-                    await f.write(json.dumps(core_doc, default=lambda x: str(x) if not isinstance(x, (dict, list, str, int, float, bool, type(None))) else x))
-                
-                # 3. Save prompt data if exists
-                if prompts_data:
-                    prompt_file = os.path.join(self.prompts_dir, f"{safe_id}.json")
-                    async with aiofiles.open(prompt_file, 'w') as f:
-                        await f.write(json.dumps(prompts_data, default=lambda x: str(x) if not isinstance(x, (dict, list, str, int, float, bool, type(None))) else x))
-                
-                # 4. Save patterns data if exists
-                if patterns_data:
-                    pattern_file = os.path.join(self.patterns_dir, f"{safe_id}.json")
-                    async with aiofiles.open(pattern_file, 'w') as f:
-                        await f.write(json.dumps(patterns_data, default=lambda x: str(x) if not isinstance(x, (dict, list, str, int, float, bool, type(None))) else x))
-                
-                # 5. Save flows data if exists
-                if flows_data:
-                    flow_file = os.path.join(self.flows_dir, f"{safe_id}.json")
-                    async with aiofiles.open(flow_file, 'w') as f:
-                        await f.write(json.dumps(flows_data, default=lambda x: str(x) if not isinstance(x, (dict, list, str, int, float, bool, type(None))) else x))
-                
-                # 6. Save graph data if exists
-                if graph_data:
-                    graph_file = os.path.join(self.graph_fragments_dir, f"{safe_id}.json")
-                    async with aiofiles.open(graph_file, 'w') as f:
-                        await f.write(json.dumps(graph_data, default=lambda x: str(x) if not isinstance(x, (dict, list, str, int, float, bool, type(None))) else x))
-                
-                success_count += 1
+## Smart Contract Security Considerations
+- Check for reentrancy vulnerabilities where state updates occur after external calls
+- Verify proper access control mechanisms for critical functions
+- Look for arithmetic issues including overflow/underflow with unchecked operations
+- Examine external calls for proper error handling and return value checking
+- Consider frontrunning vulnerabilities and transaction ordering dependence
+- Evaluate gas optimization, particularly in loops or unbounded operations
+- Verify proper event emission for critical state changes
+"""
             
-            logger.info(f"Successfully saved {success_count} documents to individual files")
-            return True
-        except Exception as e:
-            logger.error(f"Error saving document metadata: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return False
-
-    async def _load_and_attach_prompts(self):
-        """Load specialized data for all documents."""
-        try:
-            # Get all document IDs
-            document_ids = [doc.get('id') for doc in self._documents if doc.get('id')]
-            logger.info(f"Loading specialized data for {len(document_ids)} documents")
-            
-            # Keep track of loaded items for reporting
-            prompt_count = 0
-            pattern_count = 0
-            flow_count = 0
-            
-            # Process each document
-            for doc in self._documents:
-                doc_id = doc.get('id')
-                if not doc_id:
-                    continue
+            # 4. Add related security knowledge if we have a vector index
+            if self._index:
+                # Query the vector store for related security knowledge without using external APIs
+                query_str = f"security implications of: {document.get('text', '')[:300]}"
                 
-                # Create a sanitized filename from the document ID
-                safe_id = re.sub(r'[^\w\-\.]', '_', str(doc_id))
-                
-                # Load prompt data if exists
-                prompt_file = os.path.join(self.prompts_dir, f"{safe_id}.json")
-                if os.path.exists(prompt_file):
-                    async with aiofiles.open(prompt_file, 'r') as f:
-                        content = await f.read()
-                        prompts_data = json.loads(content)
-                        
-                        # Add each prompt field to document metadata
-                        for field, value in prompts_data.items():
-                            doc['metadata'][field] = value
-                            
-                        prompt_count += 1
-                
-                # Load patterns data if exists
-                pattern_file = os.path.join(self.patterns_dir, f"{safe_id}.json")
-                if os.path.exists(pattern_file):
-                    async with aiofiles.open(pattern_file, 'r') as f:
-                        content = await f.read()
-                        patterns_data = json.loads(content)
-                        
-                        # Add each pattern field to document metadata
-                        for field, value in patterns_data.items():
-                            doc['metadata'][field] = value
-                            
-                        pattern_count += 1
-                
-                # Load flows data if exists
-                flow_file = os.path.join(self.flows_dir, f"{safe_id}.json")
-                if os.path.exists(flow_file):
-                    async with aiofiles.open(flow_file, 'r') as f:
-                        content = await f.read()
-                        flows_data = json.loads(content)
-                        
-                        # Add each flow field to document metadata
-                        for field, value in flows_data.items():
-                            doc['metadata'][field] = value
-                            
-                        flow_count += 1
-                
-                # Load graph data if exists
-                graph_file = os.path.join(self.graph_fragments_dir, f"{safe_id}.json")
-                if os.path.exists(graph_file):
-                    async with aiofiles.open(graph_file, 'r') as f:
-                        content = await f.read()
-                        graph_data = json.loads(content)
-                        
-                        # Add each graph field to document metadata
-                        for field, value in graph_data.items():
-                            doc['metadata'][field] = value
-            
-            logger.info(f"Loaded and attached specialized data: {prompt_count} prompts, {pattern_count} patterns, {flow_count} flows")
-            
-            # Set flags to indicate data is loaded
-            self._prompts_loaded = True
-            self._patterns_loaded = True
-            self._flows_loaded = True
-            
-            return True
-        except Exception as e:
-            logger.error(f"Error loading and attaching specialized data: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return False
-
-    async def verify_storage(self) -> Dict[str, Any]:
-        """
-        Verify that the document storage system is working correctly.
-        Performs comprehensive checks on the file structure and document counts.
-        
-        Returns:
-            Verification report with counts, file sizes, and status
-        """
-        try:
-            # Check directory structure
-            collection_dir = os.path.join(self.storage_dir, self.collection_name)
-            
-            directories = {
-                "collection": collection_dir,
-                "metadata": self.metadata_dir,
-                "prompts": self.prompts_dir,
-                "patterns": self.patterns_dir, 
-                "flows": self.flows_dir,
-                "graphs": self.graph_fragments_dir
-            }
-            
-            report = {
-                "directories": {},
-                "document_counts": {},
-                "vector_index": {},
-                "status": "unknown"
-            }
-            
-            # Check each directory
-            for name, dir_path in directories.items():
-                dir_exists = os.path.exists(dir_path) and os.path.isdir(dir_path)
-                report["directories"][name] = {
-                    "exists": dir_exists,
-                    "path": dir_path
-                }
-                
-                if dir_exists:
-                    files = [f for f in os.listdir(dir_path) if f.endswith('.json')]
-                    report["directories"][name]["file_count"] = len(files)
-                    if files:
-                        report["directories"][name]["sample_file"] = files[0]
-            
-            # Check document index
-            index_path = os.path.join(collection_dir, "document_index.json")
-            if os.path.exists(index_path):
-                async with aiofiles.open(index_path, 'r') as f:
-                    content = await f.read()
-                    index_data = json.loads(content)
-                    report["document_counts"]["index"] = {
-                        "count": len(index_data.get("document_ids", [])),
-                        "last_updated": index_data.get("last_updated")
-                    }
-            
-            # Count documents in each directory
-            for name, dir_path in directories.items():
-                if name == "collection":
-                    continue
+                try:
+                    # Skip querying vector store if we detect OpenAI API usage which might be misconfigured
+                    from llama_index.core.retrievers import VectorIndexRetriever
                     
-                if os.path.exists(dir_path):
-                    files = [f for f in os.listdir(dir_path) if f.endswith('.json')]
-                    report["document_counts"][name] = len(files)
+                    # Use direct retrieval instead of query engine to avoid LLM usage
+                    retriever = VectorIndexRetriever(
+                        index=self._index,
+                        similarity_top_k=3,
+                    )
+                    
+                    nodes = retriever.retrieve(query_str)
+                    
+                    if nodes:
+                        security_context = "\n\n## Related Security Patterns\n"
+                        for node in nodes:
+                            if hasattr(node, 'node'):
+                                # Handle retrievers that return NodeWithScore objects
+                                node_obj = node.node
+                            else:
+                                node_obj = node
+                                
+                            content = node_obj.get_content() if hasattr(node_obj, 'get_content') else str(node_obj)
+                            security_context += f"- {content[:200]}...\n"
+                        
+                        enhanced_prompt += security_context
+                        logger.debug("Successfully added security context from vector store using direct retrieval")
+                except Exception as e:
+                    logger.warning(f"Could not retrieve from vector store using direct method: {e}")
+                    # Try fallback using raw document retrieval without LLM
+                    try:
+                        # Extract nodes directly from the index
+                        docstore = self._index.docstore
+                        if docstore and hasattr(docstore, 'docs'):
+                            # Get a small sample of documents
+                            sample_docs = list(docstore.docs.values())[:3]
+                            if sample_docs:
+                                security_context = "\n\n## General Security Considerations\n"
+                                for doc in sample_docs:
+                                    content = doc.get_content() if hasattr(doc, 'get_content') else str(doc)
+                                    trimmed = content[:150].replace('\n', ' ')
+                                    security_context += f"- Consider: {trimmed}...\n"
+                                enhanced_prompt += security_context
+                                logger.debug("Added fallback security context from document store")
+                    except Exception as inner_e:
+                        logger.warning(f"Fallback document retrieval also failed: {inner_e}")
             
-            # Check vector index
-            docstore_path = os.path.join(collection_dir, "docstore.json")
-            if os.path.exists(docstore_path):
-                report["vector_index"]["docstore_exists"] = True
-                report["vector_index"]["docstore_size"] = os.path.getsize(docstore_path)
-            else:
-                report["vector_index"]["docstore_exists"] = False
-            
-            # Check if counts match
-            memory_count = len(self._documents)
-            metadata_count = report["document_counts"].get("metadata", 0)
-            
-            report["document_counts"]["in_memory"] = memory_count
-            
-            if memory_count == metadata_count and metadata_count > 0:
-                report["status"] = "healthy"
-            elif metadata_count > 0:
-                report["status"] = "partially_saved"
-            else:
-                report["status"] = "not_saved"
-            
-            logger.info(f"Storage verification complete: {report['status']}")
-            return report
-        except Exception as e:
-            logger.error(f"Error during storage verification: {e}")
-            return {"status": "error", "error": str(e)}
+            # 5. Add question-based prompting for better reasoning
+            enhanced_prompt += """
 
-    async def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Retrieve a complete document by ID.
-        
-        Args:
-            document_id: The ID of the document to retrieve
-        
-        Returns:
-            Complete document with all metadata components, or None if not found
-        """
-        # First, check in-memory documents
-        for doc in self._documents:
-            if doc.get('id') == document_id:
-                return doc
-        
-        # If not in memory, try to load from files
-        safe_id = re.sub(r'[^\w\-\.]', '_', str(document_id))
-        
-        # Check if metadata file exists
-        metadata_file = os.path.join(self.metadata_dir, f"{safe_id}.json")
-        if not os.path.exists(metadata_file):
-            return None
-        
-        try:
-            # Load core metadata
-            async with aiofiles.open(metadata_file, 'r') as f:
-                content = await f.read()
-                document = json.loads(content)
+## Security Assessment Questions
+- What are the critical security vulnerabilities in this code?
+- How might an attacker exploit these vulnerabilities?
+- What specific security guarantees should this code provide?
+- What checks or patterns are missing that would improve security?
+- What edge cases or unexpected inputs could lead to vulnerabilities?
+"""
             
-            # Load and merge specialized data
-            # 1. Prompts
-            prompt_file = os.path.join(self.prompts_dir, f"{safe_id}.json")
-            if os.path.exists(prompt_file):
-                async with aiofiles.open(prompt_file, 'r') as f:
-                    content = await f.read()
-                    prompts_data = json.loads(content)
-                    for field, value in prompts_data.items():
-                        document['metadata'][field] = value
+            # Log prompt enhancement stats
+            enhancement_ratio = len(enhanced_prompt) / len(prompt)
+            logger.debug(f"Enhanced security prompt (ratio: {enhancement_ratio:.2f}x)")
             
-            # 2. Patterns
-            pattern_file = os.path.join(self.patterns_dir, f"{safe_id}.json")
-            if os.path.exists(pattern_file):
-                async with aiofiles.open(pattern_file, 'r') as f:
-                    content = await f.read()
-                    patterns_data = json.loads(content)
-                    for field, value in patterns_data.items():
-                        document['metadata'][field] = value
-            
-            # 3. Flows
-            flow_file = os.path.join(self.flows_dir, f"{safe_id}.json")
-            if os.path.exists(flow_file):
-                async with aiofiles.open(flow_file, 'r') as f:
-                    content = await f.read()
-                    flows_data = json.loads(content)
-                    for field, value in flows_data.items():
-                        document['metadata'][field] = value
-            
-            # 4. Graphs
-            graph_file = os.path.join(self.graph_fragments_dir, f"{safe_id}.json")
-            if os.path.exists(graph_file):
-                async with aiofiles.open(graph_file, 'r') as f:
-                    content = await f.read()
-                    graph_data = json.loads(content)
-                    for field, value in graph_data.items():
-                        document['metadata'][field] = value
-            
-            return document
+            return enhanced_prompt
         except Exception as e:
-            logger.error(f"Error loading document {document_id}: {e}")
+            logger.error(f"Error enhancing prompt with security context: {e}")
+            return prompt
+
+    def _infer_language(self, file_path: str) -> Optional[str]:
+        """Infer programming language from file extension."""
+        if not file_path:
             return None
+            
+        extensions = {
+            '.sol': 'solidity',
+            '.js': 'javascript',
+            '.ts': 'typescript',
+            '.py': 'python',
+            '.rs': 'rust',
+            '.go': 'go',
+            '.c': 'c',
+            '.cpp': 'cpp',
+            '.java': 'java'
+        }
+        
+        _, ext = os.path.splitext(file_path.lower())
+        return extensions.get(ext)
+        
+    def _get_language_vulnerability_patterns(self, language: str) -> Optional[str]:
+        """Get common vulnerability patterns for a specific language."""
+        vulnerability_patterns = {
+            'solidity': (
+                "- Reentrancy vulnerabilities where external calls occur before state updates\n"
+                "- Integer overflow/underflow in unchecked arithmetic operations\n"
+                "- Improper access control for privileged functions\n"
+                "- Front-running vulnerabilities in transaction ordering\n"
+                "- Improper use of tx.origin for authentication\n"
+                "- Gas limitations in loops over unbounded data structures\n"
+                "- Missing or insufficient event emissions\n"
+                "- Unexpected behavior with external contract dependencies"
+            ),
+            'python': (
+                "- OS command injection through shell=True or unsanitized inputs\n"
+                "- Unsafe deserialization with pickle or yaml.load()\n"
+                "- SQL injection via string formatting in queries\n"
+                "- Path traversal issues with file operations\n"
+                "- Timing attacks in comparison operations"
+            ),
+            'javascript': (
+                "- Prototype pollution via recursive object merging\n"
+                "- Unsafe eval() or Function() constructor usage\n"
+                "- Event-based race conditions\n"
+                "- DOM-based XSS vulnerabilities\n"
+                "- Insecure JWT validation"
+            ),
+            'rust': (
+                "- Unsafe blocks that violate memory safety\n"
+                "- Improper error handling with unwrap() or expect()\n"
+                "- Race conditions in concurrent code\n"
+                "- Integer overflows in arithmetic\n"
+                "- Improper lifetime management"
+            ),
+            'c': (
+                "- Buffer overflow vulnerabilities\n"
+                "- Use-after-free vulnerabilities\n"
+                "- Memory leaks\n"
+                "- Uninitialized memory usage\n"
+                "- Integer overflow/underflow"
+            )
+        }
+        
+        return vulnerability_patterns.get(language.lower())
 
     async def add_documents(self, documents: List[Any], show_progress: bool = True) -> bool:
         """
-        Add documents to the vector store with per-document file storage.
+        Add documents to the vector store with per-document file storage and security enhancements.
         
         Args:
             documents: List of documents to add
@@ -1137,12 +1006,19 @@ class SimpleVectorStore:
                                                     timeout=self.prompt_timeout  # Use the timeout from config
                                                 )
                                                 if prompt:
-                                                    # Log success and prompt length
-                                                    logger.info(f"Successfully generated prompt for doc {doc_id}: {len(prompt)} chars")
+                                                    # Enhance with security context
+                                                    enhanced_prompt = await self._enhance_prompt_with_security_context(prompt, doc)
                                                     
-                                                    # Only update document and doc_entry metadata, not node metadata
-                                                    doc['metadata']['prompt'] = prompt
-                                                    doc_entry['metadata']['prompt'] = prompt
+                                                    # Log success and prompt length
+                                                    logger.info(f"Generated security-enhanced prompt for doc {doc_id}: {len(enhanced_prompt)} chars")
+                                                    
+                                                    # Update both document and doc_entry with enhanced prompt
+                                                    doc['metadata']['prompt'] = enhanced_prompt
+                                                    doc_entry['metadata']['prompt'] = enhanced_prompt
+                                                    
+                                                    # Store original prompt for reference
+                                                    doc['metadata']['original_prompt'] = prompt
+                                                    doc_entry['metadata']['original_prompt'] = prompt
                                                 else:
                                                     logger.warning(f"Generated empty prompt for document {doc_id}")
                                             except asyncio.TimeoutError:
@@ -1207,6 +1083,61 @@ class SimpleVectorStore:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 
+    async def _load_checkpoint(self, checkpoint_path: str) -> Dict[str, Any]:
+        """
+        Load checkpoint data to resume processing, using async file I/O.
+        
+        Args:
+            checkpoint_path: Path to the checkpoint file
+            
+        Returns:
+            Dictionary containing checkpoint data with completed fingerprints, pending nodes and docs
+        """
+        try:
+            import aiofiles
+            import pickle
+            
+            if not os.path.exists(checkpoint_path):
+                logger.info(f"No checkpoint found at {checkpoint_path}, starting from scratch")
+                return {'completed_fingerprints': [], 'pending_nodes': [], 'pending_docs': []}
+            
+            async with aiofiles.open(checkpoint_path, 'rb') as f:
+                content = await f.read()
+                data = pickle.loads(content)
+            
+            logger.info(f"Loaded checkpoint with {len(data.get('completed_fingerprints', []))} completed documents")
+            return data
+        except Exception as e:
+            logger.error(f"Error loading checkpoint: {e}")
+            return {'completed_fingerprints': [], 'pending_nodes': [], 'pending_docs': []}
+
+    async def _save_checkpoint(self, checkpoint_path: str, data: Dict[str, Any]) -> bool:
+        """
+        Save checkpoint data to resume from interruptions, using async file I/O.
+            
+        Args:
+            checkpoint_path: Path to save the checkpoint
+            data: Dictionary with checkpoint data
+            
+        Returns:
+            Success status
+        """
+        try:
+            import aiofiles
+            import pickle
+            
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
+            
+            async with aiofiles.open(checkpoint_path, 'wb') as f:
+                serialized_data = pickle.dumps(data)
+                await f.write(serialized_data)
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error saving checkpoint: {e}")
+            return False
+
     async def _save_individual_document(self, doc: Dict[str, Any]) -> bool:
         """
         Save a single document to its individual files.
@@ -1234,7 +1165,7 @@ class SimpleVectorStore:
             
             # 1. Extract specialized data
             prompts_data = {}
-            for field in ['prompt', 'multi_llm_prompts', 'invariant_analysis', 'general_flaw_pattern']:
+            for field in ['prompt', 'original_prompt', 'multi_llm_prompts', 'invariant_analysis', 'general_flaw_pattern']:
                 if field in metadata:
                     prompts_data[field] = metadata.pop(field)
             

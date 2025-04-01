@@ -1167,3 +1167,61 @@ If you continue to see issues, examine the document format being provided to `ad
 
 The vector store now uses a per-document file storage system that scales to thousands of documents by storing each document's data in separate files within dedicated folders:
 
+## Security-Focused Vector Store Design
+
+The vector store is enhanced with security-specific features to support smart contract analysis and vulnerability detection:
+
+### Document Fingerprinting
+
+The `_create_document_fingerprint` method creates unique fingerprints for documents with special awareness of security-relevant metadata:
+
+1. Prioritizes security-oriented fields like:
+   - `contract_name`, `function_name`, `vulnerability_type`, etc.
+   - Standard metadata like `file_path`, `title`, etc.
+
+2. Creates a SHA-256 hash based on document content + security metadata
+   - This helps deduplicate similar documents while maintaining awareness of security context
+
+### Security Prompt Enhancement
+
+Two complementary methods enhance prompts with security context:
+
+1. `_enhance_prompts_with_questions` transforms statements into questions:
+   - Makes prompts more exploratory and reasoning-focused
+   - Adds domain-specific security questions based on content patterns
+   - References security methodologies like FLARE (Find, Lock, Analyze, Remediate, Evaluate)
+
+2. `_enhance_prompt_with_security_context` adds security knowledge:
+   - Adds document metadata context
+   - Adds language-specific vulnerability patterns
+   - Adds Solidity-specific smart contract security considerations
+   - Queries vector store for similar security knowledge
+   - Adds structured security assessment questions
+
+### Language-Specific Security Knowledge
+
+The `_get_language_vulnerability_patterns` method provides common vulnerability patterns for:
+- Solidity: Smart contract vulnerabilities (reentrancy, front-running, etc.)
+- Python: Common security issues (command injection, unsafe deserialization, etc.)
+- JavaScript: Web security issues (prototype pollution, XSS, etc.)
+- Rust: Memory and concurrency issues
+- C: Memory safety issues
+
+### Security Context Integration
+
+When adding documents to the vector store:
+1. Original prompts are generated and then enhanced with security context
+2. Both original and enhanced prompts are stored to maintain provenance
+3. Security-specific metadata is separated for efficient embedding and retrieval
+
+## Usage for Smart Contract Security Analysis
+
+The primary workflow for security analysis:
+
+1. Add smart contract code and related documentation to the vector store
+2. Generate and enhance prompts with security context
+3. Store the enhanced prompts and security metadata
+4. Query the vector store to retrieve relevant security context
+5. Use this context to guide LLM analysis of smart contracts
+
+This approach helps ensure that LLMs have the necessary context and prompting to effectively assess security guarantees in smart contract code.
